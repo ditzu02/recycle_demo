@@ -1,0 +1,172 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="hero-grid">
+  <article class="hero-card accent">
+    <p class="metric-label">Total events</p>
+    <p class="metric-value">{{ overview.total_events }}</p>
+  </article>
+  <article class="hero-card">
+    <p class="metric-label">Detected objects</p>
+    <p class="metric-value">{{ overview.total_objects }}</p>
+  </article>
+  <article class="hero-card">
+    <p class="metric-label">Active devices</p>
+    <p class="metric-value">{{ overview.active_devices }}</p>
+  </article>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <h2>Decision summary</h2>
+  </div>
+  <div class="summary-block summary-surface">
+    <div class="summary-overview">
+      <div class="summary-lead">
+        <p class="subsection-label">System aggregate</p>
+        <strong>All devices</strong>
+      </div>
+      <div class="summary-meta">
+        <span class="chip count">{{ overview.active_devices }} active</span>
+        <span class="chip count">{{ overview.total_events }} events</span>
+        <span class="chip count">{{ overview.total_objects }} objects</span>
+      </div>
+    </div>
+    <div class="decision-strip">
+      <div class="decision accept">
+        <span>Accept</span>
+        <strong>{{ overview.accept_count }}</strong>
+      </div>
+      <div class="decision review">
+        <span>Review</span>
+        <strong>{{ overview.review_count }}</strong>
+      </div>
+      <div class="decision reject">
+        <span>Reject</span>
+        <strong>{{ overview.reject_count }}</strong>
+      </div>
+    </div>
+  </div>
+
+  <div class="device-list-surface">
+    <p class="subsection-label">Per-device activity</p>
+    <div class="device-accordion">
+      {% for device in overview.devices %}
+      <details class="device-detail">
+        <summary>
+          <div class="device-summary-left">
+            <span class="status-dot" aria-hidden="true"></span>
+            <span class="chip device">{{ device.device_id }}</span>
+            <span class="chip count">{{ device.event_count }} events</span>
+            <span class="chip count">{{ device.object_count }} objects</span>
+          </div>
+          <div class="device-summary-right">
+            <span class="badge accept">Accept {{ device.accept_count }}</span>
+            <span class="badge review">Review {{ device.review_count }}</span>
+            <span class="badge reject">Reject {{ device.reject_count }}</span>
+            <time datetime="{{ device.last_seen }}" title="{{ device.last_seen }}">{{ device.last_seen|datetime_human }}</time>
+          </div>
+        </summary>
+        <div class="device-detail-body">
+          <div class="decision-strip compact">
+            <div class="decision accept">
+              <span>Accept</span>
+              <strong>{{ device.accept_count }}</strong>
+            </div>
+            <div class="decision review">
+              <span>Review</span>
+              <strong>{{ device.review_count }}</strong>
+            </div>
+            <div class="decision reject">
+              <span>Reject</span>
+              <strong>{{ device.reject_count }}</strong>
+            </div>
+          </div>
+          <div class="device-class-list">
+            {% for row in device.class_counts %}
+            <div class="device-class-row">
+              <span class="device-class-label">{{ row.label }}</span>
+              <span class="chip count">{{ row.count }}</span>
+            </div>
+            {% else %}
+            <p class="empty-state">No objects stored for this device.</p>
+            {% endfor %}
+          </div>
+        </div>
+      </details>
+      {% else %}
+      <p class="empty-state">No device activity yet.</p>
+      {% endfor %}
+    </div>
+  </div>
+</section>
+
+<section class="content-grid">
+  <article class="panel">
+    <div class="panel-head">
+      <h2>Objects by class</h2>
+    </div>
+    <div class="bar-list">
+      {% for row in overview.class_counts %}
+      {% set percent = (row.count / overview.total_objects * 100) if overview.total_objects else 0 %}
+      <div class="bar-row">
+        <div class="bar-meta">
+          <div class="bar-meta-main">
+            <strong>{{ row.label }}</strong>
+            <span class="bar-percent">{{ "%.0f"|format(percent) }}%</span>
+          </div>
+          <span class="chip count">{{ row.count }}</span>
+        </div>
+        <div class="bar-track">
+          <div class="bar-fill" style="width: {{ percent }}%;"></div>
+        </div>
+      </div>
+      {% else %}
+      <p class="empty-state">No objects stored yet.</p>
+      {% endfor %}
+    </div>
+  </article>
+
+  <article class="panel">
+    <div class="panel-head">
+      <h2>Recent device activity</h2>
+    </div>
+    <div class="device-list">
+      {% for device in overview.recent_devices %}
+      <div class="device-row">
+        <div class="device-row-main">
+          <span class="status-dot" aria-hidden="true"></span>
+          <span class="chip device">{{ device.device_id }}</span>
+          <span class="chip count">{{ device.event_count }} events</span>
+        </div>
+        <time datetime="{{ device.last_seen }}" title="{{ device.last_seen }}">{{ device.last_seen|datetime_human }}</time>
+      </div>
+      {% else %}
+      <p class="empty-state">No device activity yet.</p>
+      {% endfor %}
+    </div>
+  </article>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <h2>Latest object results</h2>
+  </div>
+  <div class="mini-table">
+    {% for row in recent_objects %}
+    {% set confidence_tone = 'high' if row.confidence >= 0.85 else 'mid' if row.confidence >= 0.6 else 'low' %}
+    <div class="mini-row">
+      <div class="mini-row-main">
+        <strong>{{ row.label }}</strong>
+        <span class="chip device">{{ row.device_id }}</span>
+      </div>
+      <div class="mini-row-right">
+        <span class="badge {{ (row.decision or 'Unknown').lower() }}">{{ row.decision or "Unknown" }}</span>
+        <span class="chip confidence {{ confidence_tone }}">{{ "%.2f"|format(row.confidence) }}</span>
+      </div>
+    </div>
+    {% else %}
+    <p class="empty-state">No recent object rows yet.</p>
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}

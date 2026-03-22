@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="panel">
+  <div class="panel-head">
+    <div>
+      <p class="subsection-label">Event feed</p>
+      <h2>Latest inference events</h2>
+    </div>
+    <span class="chip count">Page {{ page }} · {{ events|length }} events</span>
+  </div>
+  <div class="table-wrap">
+    <table class="monitor-table">
+      <thead>
+        <tr>
+          <th class="col-time">Timestamp</th>
+          <th class="col-device">Device</th>
+          <th class="col-number">Objects</th>
+          <th class="col-code">Frame</th>
+          <th class="col-source">Source</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for event in events %}
+        <tr>
+          <td class="cell-time"><time datetime="{{ event.timestamp }}" title="{{ event.timestamp }}">{{ event.timestamp|datetime_human }}</time></td>
+          <td class="cell-device"><span class="chip device">{{ event.device_id }}</span></td>
+          <td class="cell-number"><span class="chip count">{{ event.object_count }}</span></td>
+          <td class="cell-code"><span class="table-code">{{ event.frame_width or "-" }} x {{ event.frame_height or "-" }}</span></td>
+          <td class="cell-source">
+            <span class="chip source" title="{{ event.source_type }}">{{ event.source_type|replace('_', ' ')|title }}</span>
+          </td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="5" class="empty-cell">No events stored yet.</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <div>
+      <p class="subsection-label">Object window</p>
+      <h2>Latest object-level results</h2>
+    </div>
+    <p>Objects linked to the same event page shown above.</p>
+  </div>
+  <div class="table-wrap">
+    <table class="monitor-table">
+      <thead>
+        <tr>
+          <th class="col-time">Timestamp</th>
+          <th class="col-device">Device</th>
+          <th>Class</th>
+          <th class="col-number">Confidence</th>
+          <th>Status</th>
+          <th class="col-number">Dirty p</th>
+          <th class="col-number">Score</th>
+          <th class="col-decision">Decision</th>
+          <th class="col-code">Bounding box</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in objects %}
+        {% set confidence_tone = 'high' if row.confidence >= 0.85 else 'mid' if row.confidence >= 0.6 else 'low' %}
+        <tr>
+          <td class="cell-time"><time datetime="{{ row.timestamp }}" title="{{ row.timestamp }}">{{ row.timestamp|datetime_human }}</time></td>
+          <td class="cell-device"><span class="chip device">{{ row.device_id }}</span></td>
+          <td><strong class="table-primary">{{ row.label }}</strong></td>
+          <td class="cell-number"><span class="chip confidence {{ confidence_tone }}">{{ "%.2f"|format(row.confidence) }}</span></td>
+          <td class="cell-source">
+            <span class="chip source">{{ row.contamination_status or "-" }}</span>
+          </td>
+          <td class="cell-number">{{ "%.2f"|format(row.dirty_probability) if row.dirty_probability is not none else "-" }}</td>
+          <td class="cell-number">{{ "%.2f"|format(row.score) if row.score is not none else "-" }}</td>
+          <td class="cell-decision"><span class="badge {{ (row.decision or 'unknown').lower() }}">{{ row.decision or "Unknown" }}</span></td>
+          <td class="cell-code">
+            {% if row.bbox_x1 is not none %}
+            <span class="table-code">[{{ row.bbox_x1|int }}, {{ row.bbox_y1|int }}, {{ row.bbox_x2|int }}, {{ row.bbox_y2|int }}]</span>
+            {% else %}
+            -
+            {% endif %}
+          </td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="9" class="empty-cell">No object rows stored yet.</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<nav class="pager" aria-label="Events pagination">
+  <div class="pager-meta">
+    <span class="chip count">Limit {{ limit }}</span>
+    <span class="chip source">Server-rendered page {{ page }}</span>
+  </div>
+  <div class="pager-actions">
+    {% if has_previous %}
+    <a class="pager-link" href="/events?page={{ previous_page }}&limit={{ limit }}">Previous</a>
+    {% else %}
+    <span class="pager-link disabled" aria-disabled="true">Previous</span>
+    {% endif %}
+
+    {% if has_next %}
+    <a class="pager-link" href="/events?page={{ next_page }}&limit={{ limit }}">Next</a>
+    {% else %}
+    <span class="pager-link disabled" aria-disabled="true">Next</span>
+    {% endif %}
+  </div>
+</nav>
+{% endblock %}

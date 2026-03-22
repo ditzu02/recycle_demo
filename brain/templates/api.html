@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="panel system-panel">
+  <div class="panel-head">
+    <div>
+      <p class="subsection-label">Control surface</p>
+      <h2>Local API explorer</h2>
+    </div>
+    <span class="badge status">Service online</span>
+  </div>
+  <div class="system-summary-grid compact">
+    <article class="summary-tile">
+      <p class="metric-label">Service status</p>
+      <strong class="summary-tile-value">{{ system_summary.status }}</strong>
+    </article>
+    <article class="summary-tile">
+      <p class="metric-label">Active devices</p>
+      <strong class="summary-tile-value">{{ system_summary.active_devices }}</strong>
+    </article>
+    <article class="summary-tile">
+      <p class="metric-label">Stored events</p>
+      <strong class="summary-tile-value">{{ system_summary.total_events }}</strong>
+    </article>
+    <article class="summary-tile">
+      <p class="metric-label">Detected objects</p>
+      <strong class="summary-tile-value">{{ system_summary.total_objects }}</strong>
+    </article>
+  </div>
+</section>
+
+<section class="api-stack">
+  {% for endpoint in endpoints %}
+  <article class="panel api-card">
+    <div class="panel-head api-card-head">
+      <div class="endpoint-heading">
+        <span class="badge method {{ endpoint.method|lower() }}">{{ endpoint.method }}</span>
+        <strong class="endpoint-path">{{ endpoint.path }}</strong>
+      </div>
+    </div>
+    <p class="api-copy">{{ endpoint.description }}</p>
+    <p class="api-note">{{ endpoint.notes }}</p>
+    <div class="code-surface">
+      <div class="code-surface-head">
+        <span class="subsection-label">{{ endpoint.sample_label }}</span>
+      </div>
+      <pre class="code-block"><code>{{ endpoint.sample_body }}</code></pre>
+    </div>
+  </article>
+  {% endfor %}
+</section>
+{% endblock %}
