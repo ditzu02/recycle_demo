@@ -85,6 +85,11 @@ summary:focus-visible {
   padding: 32px 20px 56px;
 }
 
+.page-shell.is-loading #page-content {
+  opacity: 0.72;
+  transition: opacity var(--transition-fast);
+}
+
 .site-header {
   display: flex;
   justify-content: space-between;
@@ -96,7 +101,7 @@ summary:focus-visible {
   border: 1px solid rgba(255, 255, 255, 0.82);
   border-radius: calc(var(--radius-lg) + 4px);
   box-shadow: var(--shadow-soft);
-  backdrop-filter: blur(14px);
+  backdrop-filter: blur(10px);
 }
 
 .site-brand {
@@ -186,8 +191,12 @@ summary:focus-visible {
   border-radius: var(--radius-lg);
   padding: var(--card-pad);
   box-shadow: var(--shadow);
-  backdrop-filter: blur(16px);
   transition: transform var(--transition-fast), box-shadow var(--transition-fast), border-color var(--transition-fast), background-color var(--transition-fast);
+}
+
+.panel {
+  content-visibility: auto;
+  contain-intrinsic-size: 420px;
 }
 
 .hero-card {
@@ -197,7 +206,7 @@ summary:focus-visible {
 
 .hero-card:hover,
 .panel:hover {
-  transform: translateY(-2px);
+  transform: translateY(-1px);
   box-shadow: 0 24px 58px rgba(19, 34, 57, 0.13);
 }
 
@@ -905,5 +914,28 @@ td {
 
   .device-summary-right {
     justify-content: flex-start;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .page-shell.is-loading #page-content,
+  .site-nav a,
+  .hero-card,
+  .panel,
+  .badge,
+  .chip,
+  .table-code,
+  .pager-link {
+    transition: none;
+  }
+
+  .site-nav a:hover,
+  .hero-card:hover,
+  .panel:hover,
+  .badge:hover,
+  .chip:hover,
+  .table-code:hover,
+  .pager-link:hover {
+    transform: none;
   }
 }

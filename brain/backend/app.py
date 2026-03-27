@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import mimetypes
 from datetime import datetime
 from pathlib import Path
 from typing import Callable
@@ -59,10 +60,12 @@ class BrainApplication:
                 return self._json(start_response, 200, payload)
             if method == "POST" and path == "/api/inference":
                 return self._post_inference(start_response, environ)
-            if method == "GET" and path == "/static/styles.css":
-                return self._static_file(start_response, STATIC_DIR / "styles.css", "text/css; charset=utf-8")
+            if method == "GET" and path.startswith("/static/"):
+                return self._static_file(start_response, path)
         except SchemaValidationError as exc:
             return self._json(start_response, 400, {"status": "error", "detail": str(exc)})
+        except FileNotFoundError:
+            return self._json(start_response, 404, {"status": "error", "detail": "Not found"})
         except Exception as exc:  # pragma: no cover - demo-level fallback
             return self._json(start_response, 500, {"status": "error", "detail": str(exc)})
 
@@ -237,8 +240,22 @@ class BrainApplication:
         )
         return [body]
 
-    def _static_file(self, start_response: Callable, path: Path, content_type: str):
-        body = path.read_bytes()
+    def _static_file(self, start_response: Callable, request_path: str):
+        static_root = STATIC_DIR.resolve()
+        relative_path = request_path.removeprefix("/static/").strip("/")
+        target_path = (static_root / relative_path).resolve()
+        if static_root not in target_path.parents and target_path != static_root:
+            raise FileNotFoundError(request_path)
+        if not target_path.is_file():
+            raise FileNotFoundError(request_path)
+
+        content_type, _ = mimetypes.guess_type(target_path.name)
+        if content_type is None:
+            content_type = "application/octet-stream"
+        elif content_type.startswith("text/"):
+            content_type = f"{content_type}; charset=utf-8"
+
+        body = target_path.read_bytes()
         start_response(
             "200 OK",
             [
