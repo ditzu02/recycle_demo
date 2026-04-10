@@ -11,8 +11,8 @@ from brain.mock.seed import generate_mock_event
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Send mock recycling inference events to the brain server.")
-    parser.add_argument("--server", default="http://127.0.0.1:8000/api/inference", help="Inference API endpoint.")
+    parser = argparse.ArgumentParser(description="Send mock finalized inspection events to the brain server.")
+    parser.add_argument("--server", default="http://127.0.0.1:8000/api/inference", help="Finalized inspection API endpoint.")
     parser.add_argument("--count", type=int, default=10, help="Number of events to send.")
     parser.add_argument("--devices", type=int, default=3, help="Number of simulated devices.")
     parser.add_argument("--interval", type=float, default=0.15, help="Delay between events in seconds.")
@@ -33,7 +33,7 @@ def main() -> None:
         response = _post_json(args.server, payload)
         print(
             f"sent seq={sequence:02d} device={device_id} "
-            f"objects={len(payload['objects'])} status={response['status']}"
+            f"objects={len(payload['objects'])} status={response['status']} result={response.get('result', '-')}"
         )
         time.sleep(args.interval)
 

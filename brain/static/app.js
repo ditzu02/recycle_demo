@@ -7,6 +7,10 @@
   const parser = new DOMParser();
   const cache = new Map();
   const cacheTtlMs = 5000;
+  const autoRefreshMs = 5000;
+  const livePages = new Set(["overview", "events"]);
+  let refreshTimerId = 0;
+  let refreshInFlight = false;
 
   if (!shell || !pageName || !pageDescription || !pageContent || !navLinks.length || !window.history.pushState) {
     return;
@@ -92,16 +96,18 @@
     pageContent.dataset.pageKey = state.activePage;
     shell.dataset.pageKey = state.activePage;
     updateActiveNav(state.activePage);
+    syncLiveRefresh();
     if (scroll) {
       window.scrollTo({ top: 0, left: 0, behavior: "auto" });
     }
   }
 
-  async function fetchState(urlKey) {
+  async function fetchState(urlKey, { force = false } = {}) {
     const response = await fetch(urlKey, {
       headers: {
         Accept: "text/html",
       },
+      cache: force ? "no-store" : "default",
       credentials: "same-origin",
     });
     if (!response.ok) {
@@ -151,8 +157,51 @@
     fetchState(urlKey).catch(() => {});
   }
 
+  function clearLiveRefresh() {
+    if (refreshTimerId) {
+      window.clearInterval(refreshTimerId);
+      refreshTimerId = 0;
+    }
+  }
+
+  function syncLiveRefresh() {
+    clearLiveRefresh();
+    const activePage = pageContent.dataset.pageKey || "";
+    if (!livePages.has(activePage)) {
+      return;
+    }
+    refreshTimerId = window.setInterval(() => {
+      if (document.hidden || refreshInFlight || shell.classList.contains("is-loading")) {
+        return;
+      }
+      void refreshCurrentPage();
+    }, autoRefreshMs);
+  }
+
+  async function refreshCurrentPage() {
+    const urlKey = getCurrentKey();
+    const activePage = pageContent.dataset.pageKey || "";
+    if (!livePages.has(activePage)) {
+      return;
+    }
+
+    refreshInFlight = true;
+    try {
+      const nextState = await fetchState(urlKey, { force: true });
+      if (getCurrentKey() !== urlKey) {
+        return;
+      }
+      render(nextState, { scroll: false });
+    } catch (error) {
+      // Ignore transient demo refresh errors and keep the current page visible.
+    } finally {
+      refreshInFlight = false;
+    }
+  }
+
   remember(getCurrentKey(), readState(document));
   updateActiveNav(pageContent.dataset.pageKey || "");
+  syncLiveRefresh();
 
   document.addEventListener("click", (event) => {
     if (
@@ -220,5 +269,11 @@
       .finally(() => {
         shell.classList.remove("is-loading");
       });
+  });
+
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) {
+      void refreshCurrentPage();
+    }
   });
 })();

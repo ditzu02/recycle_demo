@@ -435,6 +435,47 @@ summary:focus-visible {
   padding: 18px 20px 20px;
 }
 
+.meta-list {
+  display: grid;
+  gap: 10px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: rgba(247, 251, 255, 0.62);
+}
+
+.meta-row,
+.meta-inline,
+.time-stack {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: center;
+}
+
+.meta-row {
+  justify-content: space-between;
+  border-bottom: 1px solid rgba(20, 34, 53, 0.08);
+  padding-bottom: 10px;
+}
+
+.meta-row:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.meta-row > span:first-child {
+  color: var(--muted);
+  font-size: 0.88rem;
+  font-weight: 700;
+}
+
+.time-stack {
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+
 .device-class-list {
   display: grid;
   gap: 10px;
@@ -665,6 +706,21 @@ td {
 .badge.status {
   background: rgba(47, 109, 246, 0.12);
   color: var(--accent-ink);
+}
+
+.badge.fresh {
+  background: rgba(47, 125, 74, 0.14);
+  color: var(--accept);
+}
+
+.badge.stale {
+  background: rgba(185, 133, 25, 0.14);
+  color: var(--review);
+}
+
+.badge.never {
+  background: rgba(20, 34, 53, 0.08);
+  color: var(--muted-strong);
 }
 
 .badge.method.get {
@@ -914,6 +970,11 @@ td {
 
   .device-summary-right {
     justify-content: flex-start;
+  }
+
+  .meta-row,
+  .time-stack {
+    align-items: flex-start;
   }
 }
 

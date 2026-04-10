@@ -5,7 +5,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from brain.database.repository import BrainRepository
-from brain.models.schema import parse_inference_payload
+from brain.models.schema import CANONICAL_EVENT_TYPE, CANONICAL_SCHEMA_VERSION, parse_inference_payload
 
 
 CLASS_LABELS = ["Metal", "Plastic", "Glass", "Paper_Cardboard", "Organic", "Other"]
@@ -41,9 +41,16 @@ def generate_mock_event(
         confidence = round(randomizer.uniform(0.72, 0.98), 2)
         bbox = _random_bbox(randomizer)
         obj = {
+            "object_id": f"{device_id}-{sequence:04d}-{object_index:02d}",
+            "class_id": CLASS_LABELS.index(label),
             "label": label,
             "confidence": confidence,
             "bbox": bbox,
+            "score": None,
+            "decision": None,
+            "contamination_status": None,
+            "dirty_probability": None,
+            "clean_probability": None,
         }
         if label == "Metal":
             dirty_probability = round(randomizer.uniform(0.05, 0.92), 2)
@@ -51,9 +58,17 @@ def generate_mock_event(
             obj.update(
                 {
                     "dirty_probability": dirty_probability,
+                    "clean_probability": round(1 - dirty_probability, 2),
                     "score": score,
                     "decision": decision,
                     "contamination_status": contamination_status,
+                    "refinement": {
+                        "applied": True,
+                        "probabilities": {
+                            "dirty": dirty_probability,
+                            "clean": round(1 - dirty_probability, 2),
+                        },
+                    },
                 }
             )
         else:
@@ -68,6 +83,8 @@ def generate_mock_event(
         objects.append(obj)
 
     return {
+        "schema_version": CANONICAL_SCHEMA_VERSION,
+        "event_type": CANONICAL_EVENT_TYPE,
         "event_id": f"{device_id}-{sequence:04d}",
         "device_id": device_id,
         "timestamp": timestamp.isoformat(),
@@ -80,6 +97,7 @@ def generate_mock_event(
             "height": 720,
             "frame_index": sequence,
         },
+        "inspection_outcome": {},
         "objects": objects,
     }
 
@@ -105,4 +123,9 @@ def _random_bbox(randomizer: random.Random) -> list[int]:
     y1 = randomizer.randint(20, 260)
     width = randomizer.randint(80, 220)
     height = randomizer.randint(80, 220)
-    return [x1, y1, x1 + width, y1 + height]
+    return {
+        "x1": x1,
+        "y1": y1,
+        "x2": x1 + width,
+        "y2": y1 + height,
+    }

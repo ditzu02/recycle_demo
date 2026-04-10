@@ -10,7 +10,7 @@
     <p class="metric-value">{{ overview.total_objects }}</p>
   </article>
   <article class="hero-card">
-    <p class="metric-label">Active devices</p>
+    <p class="metric-label">Known devices</p>
     <p class="metric-value">{{ overview.active_devices }}</p>
   </article>
 </section>
@@ -58,15 +58,64 @@
             <span class="chip device">{{ device.device_id }}</span>
             <span class="chip count">{{ device.event_count }} events</span>
             <span class="chip count">{{ device.object_count }} objects</span>
+            <span class="chip source">{{ device.last_contact_kind|replace('_', ' ')|title }}</span>
           </div>
           <div class="device-summary-right">
+            <span class="badge {{ device.heartbeat_freshness }}">{{ device.heartbeat_freshness|title }} heartbeat</span>
+            {% if device.last_heartbeat_status %}
+            <span class="chip source">{{ device.last_heartbeat_status|title }}</span>
+            {% endif %}
             <span class="badge accept">Accept {{ device.accept_count }}</span>
             <span class="badge review">Review {{ device.review_count }}</span>
             <span class="badge reject">Reject {{ device.reject_count }}</span>
-            <time datetime="{{ device.last_seen }}" title="{{ device.last_seen }}">{{ device.last_seen|datetime_human }}</time>
+            <div class="time-stack">
+              <span class="subsection-label">Last contact</span>
+              <time datetime="{{ device.last_seen }}" title="{{ device.last_seen }}">{{ device.last_seen|datetime_human }}</time>
+            </div>
           </div>
         </summary>
         <div class="device-detail-body">
+          <div class="meta-list">
+            <div class="meta-row">
+              <span>Brain last contact</span>
+              <time datetime="{{ device.last_seen }}" title="{{ device.last_seen }}">{{ device.last_seen|datetime_human }}</time>
+            </div>
+            <div class="meta-row">
+              <span>Device timestamp</span>
+              {% if device.last_contact_device_timestamp %}
+              <time datetime="{{ device.last_contact_device_timestamp }}" title="{{ device.last_contact_device_timestamp }}">{{ device.last_contact_device_timestamp|datetime_human }}</time>
+              {% else %}
+              <span>-</span>
+              {% endif %}
+            </div>
+            <div class="meta-row">
+              <span>Last heartbeat</span>
+              <div class="meta-inline">
+                <span class="badge {{ device.heartbeat_freshness }}">{{ device.heartbeat_freshness|title }}</span>
+                {% if device.last_heartbeat_status %}
+                <span class="chip source">{{ device.last_heartbeat_status|title }}</span>
+                {% endif %}
+                {% if device.last_heartbeat_received_at %}
+                <time datetime="{{ device.last_heartbeat_received_at }}" title="{{ device.last_heartbeat_received_at }}">{{ device.last_heartbeat_received_at|datetime_human }}</time>
+                {% else %}
+                <span>-</span>
+                {% endif %}
+              </div>
+            </div>
+            <div class="meta-row">
+              <span>Last accepted event</span>
+              <div class="meta-inline">
+                {% if device.last_event_id %}
+                <span class="table-code">{{ device.last_event_id }}</span>
+                {% endif %}
+                {% if device.last_event_received_at %}
+                <time datetime="{{ device.last_event_received_at }}" title="{{ device.last_event_received_at }}">{{ device.last_event_received_at|datetime_human }}</time>
+                {% else %}
+                <span>-</span>
+                {% endif %}
+              </div>
+            </div>
+          </div>
           <div class="decision-strip compact">
             <div class="decision accept">
               <span>Accept</span>
@@ -136,9 +185,17 @@
         <div class="device-row-main">
           <span class="status-dot" aria-hidden="true"></span>
           <span class="chip device">{{ device.device_id }}</span>
+          <span class="chip source">{{ device.last_contact_kind|replace('_', ' ')|title }}</span>
           <span class="chip count">{{ device.event_count }} events</span>
+          <span class="badge {{ device.heartbeat_freshness }}">{{ device.heartbeat_freshness|title }} heartbeat</span>
+          {% if device.last_heartbeat_status %}
+          <span class="chip source">{{ device.last_heartbeat_status|title }}</span>
+          {% endif %}
         </div>
-        <time datetime="{{ device.last_seen }}" title="{{ device.last_seen }}">{{ device.last_seen|datetime_human }}</time>
+        <div class="time-stack">
+          <span class="subsection-label">Last contact</span>
+          <time datetime="{{ device.last_seen }}" title="{{ device.last_seen }}">{{ device.last_seen|datetime_human }}</time>
+        </div>
       </div>
       {% else %}
       <p class="empty-state">No device activity yet.</p>
