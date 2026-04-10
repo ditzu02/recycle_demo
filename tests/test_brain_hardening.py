@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import io
 import json
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 from wsgiref.util import setup_testing_defaults
 
 from brain.backend.app import BrainApplication, _seed_mock_enabled
@@ -123,6 +125,35 @@ class BrainHardeningTests(unittest.TestCase):
         heartbeat = parse_heartbeat_payload(build_heartbeat_payload())
         self.assertEqual(heartbeat.device_id, "pi_01")
         self.assertEqual(heartbeat.status, "online")
+
+    def test_repository_closes_connections_after_use(self) -> None:
+        original_connect = sqlite3.connect
+        opened_connections: list[sqlite3.Connection] = []
+
+        class TrackingConnection(sqlite3.Connection):
+            closed_count = 0
+
+            def close(self) -> None:
+                type(self).closed_count += 1
+                super().close()
+
+        def connect(*args, **kwargs):
+            kwargs["factory"] = TrackingConnection
+            connection = original_connect(*args, **kwargs)
+            opened_connections.append(connection)
+            return connection
+
+        TrackingConnection.closed_count = 0
+        with tempfile.TemporaryDirectory() as tempdir, mock.patch(
+            "brain.database.repository.sqlite3.connect",
+            side_effect=connect,
+        ):
+            repository = BrainRepository(Path(tempdir) / "brain.db")
+            repository.initialize()
+            repository.count_events()
+
+        self.assertEqual(len(opened_connections), 3)
+        self.assertEqual(TrackingConnection.closed_count, len(opened_connections))
 
     def test_seed_mock_env_values(self) -> None:
         self.assertTrue(_seed_mock_enabled(None))
