@@ -14,7 +14,8 @@ Current v1 scope:
 
 - camera capture via OpenCV
 - YOLOv8 bbox detections
-- metal-only filtering and contamination evaluation
+- full-frame tracking with a designated evaluation zone gate
+- metal-only contamination evaluation inside that gate
 - lightweight per-object temporal tracking and stabilization
 - explicit `Accept` / `Review` / `Reject` decisions
 - canonical Brain-v1 event and heartbeat payload mapping
@@ -76,13 +77,18 @@ Useful runtime knobs:
 - `EDGE_CONFIDENCE_THRESHOLD`
 - `EDGE_STABLE_AFTER_FRAMES`
 - `EDGE_MAX_MISSED_FRAMES`
-- `EDGE_INSPECTION_ZONE`
+- `EDGE_MIN_IN_ZONE_FRAMES_FOR_EVALUATION`
+- `EDGE_EVALUATION_ZONE`
 - `EDGE_SHOW_PREVIEW`
 
 ### Edge Notes
 
+- The current demo runtime tracks the whole frame, but only evaluates objects after they become stable and dwell inside the evaluation zone.
 - The current demo runtime filters to `Metal` by default because the contamination CNN is metal-specific.
+- The default evaluation zone is a normalized lower-frame rectangle: `0.20,0.55,0.80,0.95`.
+- `EDGE_INSPECTION_ZONE` is still accepted as a compatibility alias for `EDGE_EVALUATION_ZONE`.
 - The runtime emits one finalized Brain-v1 event per completed tracked-object lifecycle.
+- A track is evaluated once per pass through the gate and emits once when it leaves the zone or disappears after evaluation.
 - `event_id` includes the device id, a runtime session token, the finalized frame index, and the track number so retries stay stable without reusing ids across separate runs.
 - `inspection_outcome` is always included as an object and stays `{}` in this phase.
 - Heartbeats are sent to `POST /api/heartbeat`.

@@ -146,9 +146,15 @@ class TrackState:
     label_history: list[str] = field(default_factory=list)
     latest_snapshot: TrackSnapshot | None = None
     best_snapshot: TrackSnapshot | None = None
+    in_evaluation_zone: bool = False
+    has_entered_evaluation_zone: bool = False
+    in_zone_consecutive_hits: int = 0
+    best_in_zone_snapshot: TrackSnapshot | None = None
     contamination: ContaminationResult | None = None
     decision: DecisionResult | None = None
     event_id: str | None = None
+    event_emitted: bool = False
+    evaluation_frame_index: int | None = None
 
     def observe(self, frame: FrameSample, detection: Detection) -> None:
         snapshot = TrackSnapshot(
@@ -187,6 +193,41 @@ class TrackState:
     def miss(self) -> None:
         self.missed_frames += 1
         self.consecutive_hits = 0
+
+    def was_observed_in_frame(self, frame_index: int) -> bool:
+        return self.latest_snapshot is not None and self.latest_snapshot.frame_index == frame_index
+
+    def update_evaluation_zone(self, *, frame: FrameSample, in_zone: bool) -> bool:
+        was_in_zone = self.in_evaluation_zone
+        just_left_zone = was_in_zone and not in_zone
+        self.in_evaluation_zone = in_zone
+
+        if not in_zone:
+            self.in_zone_consecutive_hits = 0
+            return just_left_zone
+
+        self.has_entered_evaluation_zone = True
+        self.in_zone_consecutive_hits = self.in_zone_consecutive_hits + 1 if was_in_zone else 1
+
+        if not self.was_observed_in_frame(frame.index) or self.latest_snapshot is None:
+            return just_left_zone
+
+        snapshot = TrackSnapshot(
+            frame_index=self.latest_snapshot.frame_index,
+            captured_at=self.latest_snapshot.captured_at,
+            frame_width=self.latest_snapshot.frame_width,
+            frame_height=self.latest_snapshot.frame_height,
+            bbox=self.latest_snapshot.bbox,
+            confidence=self.latest_snapshot.confidence,
+            label=self.latest_snapshot.label,
+            class_id=self.latest_snapshot.class_id,
+            image=frame.image.copy(),
+        )
+
+        if self.best_in_zone_snapshot is None or snapshot.confidence >= self.best_in_zone_snapshot.confidence:
+            self.best_in_zone_snapshot = snapshot
+
+        return just_left_zone
 
 
 @dataclass(frozen=True)

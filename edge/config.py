@@ -31,20 +31,24 @@ class ThresholdConfig:
     iou_match: float = 0.30
     stable_after_frames: int = 3
     max_missed_frames: int = 5
+    min_in_zone_frames_for_evaluation: int = 2
     dirty_review_threshold: float = 0.40
     dirty_reject_threshold: float = 0.70
     min_size_ratio: float | None = None
 
 
 @dataclass
-class InspectionZoneConfig:
-    x1: float = 0.0
-    y1: float = 0.0
-    x2: float = 1.0
-    y2: float = 1.0
+class EvaluationZoneConfig:
+    x1: float = 0.20
+    y1: float = 0.55
+    x2: float = 0.80
+    y2: float = 0.95
 
     def as_tuple(self) -> tuple[float, float, float, float]:
         return (self.x1, self.y1, self.x2, self.y2)
+
+
+InspectionZoneConfig = EvaluationZoneConfig
 
 
 @dataclass
@@ -65,11 +69,14 @@ class EdgeConfig:
     camera: CameraConfig = field(default_factory=CameraConfig)
     models: ModelConfig = field(default_factory=ModelConfig)
     thresholds: ThresholdConfig = field(default_factory=ThresholdConfig)
-    inspection_zone: InspectionZoneConfig = field(default_factory=InspectionZoneConfig)
+    evaluation_zone: EvaluationZoneConfig = field(default_factory=EvaluationZoneConfig)
 
     @classmethod
     def from_env(cls) -> EdgeConfig:
         brain_base_url = os.getenv("EDGE_BRAIN_BASE_URL", "http://127.0.0.1:8000").rstrip("/")
+        evaluation_zone_value = os.getenv("EDGE_EVALUATION_ZONE")
+        if evaluation_zone_value is None:
+            evaluation_zone_value = os.getenv("EDGE_INSPECTION_ZONE", "0.20,0.55,0.80,0.95")
         event_endpoint = _resolve_endpoint(
             base_url=brain_base_url,
             value=os.getenv("EDGE_EVENT_ENDPOINT_URL", "/api/inference"),
@@ -111,13 +118,12 @@ class EdgeConfig:
                 iou_match=_env_float("EDGE_IOU_THRESHOLD", 0.30),
                 stable_after_frames=_env_int("EDGE_STABLE_AFTER_FRAMES", 3),
                 max_missed_frames=_env_int("EDGE_MAX_MISSED_FRAMES", 5),
+                min_in_zone_frames_for_evaluation=_env_int("EDGE_MIN_IN_ZONE_FRAMES_FOR_EVALUATION", 2),
                 dirty_review_threshold=_env_float("EDGE_DIRTY_REVIEW_THRESHOLD", 0.40),
                 dirty_reject_threshold=_env_float("EDGE_DIRTY_REJECT_THRESHOLD", 0.70),
                 min_size_ratio=_env_optional_float("EDGE_MIN_SIZE_RATIO"),
             ),
-            inspection_zone=_parse_zone(
-                os.getenv("EDGE_INSPECTION_ZONE", "0.0,0.0,1.0,1.0"),
-            ),
+            evaluation_zone=_parse_zone(evaluation_zone_value),
         )
 
     def validate(self) -> None:
@@ -127,11 +133,21 @@ class EdgeConfig:
             raise ValueError("stable_after_frames must be at least 1.")
         if self.thresholds.max_missed_frames < 1:
             raise ValueError("max_missed_frames must be at least 1.")
+        if self.thresholds.min_in_zone_frames_for_evaluation < 1:
+            raise ValueError("min_in_zone_frames_for_evaluation must be at least 1.")
         if self.thresholds.dirty_review_threshold > self.thresholds.dirty_reject_threshold:
             raise ValueError("dirty review threshold must be less than or equal to dirty reject threshold.")
-        zone = self.inspection_zone
+        zone = self.evaluation_zone
         if not (0.0 <= zone.x1 < zone.x2 <= 1.0 and 0.0 <= zone.y1 < zone.y2 <= 1.0):
-            raise ValueError("inspection zone must be normalized and ordered within [0, 1].")
+            raise ValueError("evaluation zone must be normalized and ordered within [0, 1].")
+
+    @property
+    def inspection_zone(self) -> EvaluationZoneConfig:
+        return self.evaluation_zone
+
+    @inspection_zone.setter
+    def inspection_zone(self, value: EvaluationZoneConfig) -> None:
+        self.evaluation_zone = value
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -149,9 +165,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--iou-threshold", type=float)
     parser.add_argument("--stable-frames", type=int)
     parser.add_argument("--missed-frames", type=int)
+    parser.add_argument("--min-in-zone-frames", type=int)
     parser.add_argument("--min-size-ratio", type=float)
     parser.add_argument("--allowed-classes")
-    parser.add_argument("--inspection-zone", help="Normalized x1,y1,x2,y2 rectangle.")
+    parser.add_argument("--evaluation-zone", help="Normalized x1,y1,x2,y2 rectangle used as the evaluation gate.")
+    parser.add_argument("--inspection-zone", help=argparse.SUPPRESS)
     parser.add_argument("--yolo-model-path")
     parser.add_argument("--contamination-model-path")
     parser.add_argument("--source-type")
@@ -195,12 +213,16 @@ def build_config(argv: list[str] | None = None) -> EdgeConfig:
         config.thresholds.stable_after_frames = args.stable_frames
     if args.missed_frames is not None:
         config.thresholds.max_missed_frames = args.missed_frames
+    if args.min_in_zone_frames is not None:
+        config.thresholds.min_in_zone_frames_for_evaluation = args.min_in_zone_frames
     if args.min_size_ratio is not None:
         config.thresholds.min_size_ratio = args.min_size_ratio
     if args.allowed_classes:
         config.allowed_classes = _parse_csv(args.allowed_classes)
     if args.inspection_zone:
-        config.inspection_zone = _parse_zone(args.inspection_zone)
+        config.evaluation_zone = _parse_zone(args.inspection_zone)
+    if args.evaluation_zone:
+        config.evaluation_zone = _parse_zone(args.evaluation_zone)
     if args.yolo_model_path:
         config.models.yolo_model_path = Path(args.yolo_model_path)
     if args.contamination_model_path:
@@ -257,8 +279,8 @@ def _parse_csv(value: str) -> tuple[str, ...]:
     return tuple(part.strip() for part in value.split(",") if part.strip())
 
 
-def _parse_zone(value: str) -> InspectionZoneConfig:
+def _parse_zone(value: str) -> EvaluationZoneConfig:
     parts = [float(part.strip()) for part in value.split(",")]
     if len(parts) != 4:
-        raise ValueError("inspection zone must be x1,y1,x2,y2")
-    return InspectionZoneConfig(*parts)
+        raise ValueError("evaluation zone must be x1,y1,x2,y2")
+    return EvaluationZoneConfig(*parts)

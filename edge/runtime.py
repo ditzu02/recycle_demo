@@ -8,7 +8,7 @@ from typing import Callable
 
 from edge.config import EdgeConfig
 from edge.decision import DecisionEngine
-from edge.filtering import DetectionFilter
+from edge.filtering import DetectionFilter, is_bbox_center_in_zone, zone_bounds_to_pixels
 from edge.payloads import build_event_id, map_event_payload, map_heartbeat_payload
 from edge.stabilization import TrackStabilizer
 from edge.tracking import TrackManager
@@ -53,14 +53,16 @@ class EdgeRuntime:
         self.filter = DetectionFilter(
             confidence_threshold=config.thresholds.confidence,
             allowed_classes=config.allowed_classes,
-            inspection_zone=config.inspection_zone,
             min_size_ratio=config.thresholds.min_size_ratio,
         )
         self.tracks = TrackManager(
             iou_threshold=config.thresholds.iou_match,
             max_missed_frames=config.thresholds.max_missed_frames,
         )
-        self.stabilizer = TrackStabilizer(stable_after_frames=config.thresholds.stable_after_frames)
+        self.stabilizer = TrackStabilizer(
+            stable_after_frames=config.thresholds.stable_after_frames,
+            min_in_zone_frames_for_evaluation=config.thresholds.min_in_zone_frames_for_evaluation,
+        )
         self.decision_engine = DecisionEngine(
             review_threshold=config.thresholds.dirty_review_threshold,
             reject_threshold=config.thresholds.dirty_reject_threshold,
@@ -129,31 +131,37 @@ class EdgeRuntime:
         active_tracks, finished_tracks = self.tracks.update(frame, filtered)
 
         for track in active_tracks:
+            just_left_zone = False
+            if track.was_observed_in_frame(frame.index):
+                just_left_zone = self._update_track_zone(track, frame)
             self.stabilizer.advance(track)
             if self.stabilizer.should_evaluate(track):
                 self._evaluate_track(track)
+            if self.stabilizer.should_emit_on_zone_exit(track, just_left_zone=just_left_zone):
+                self._queue_finalized_event(track)
 
         for track in finished_tracks:
             should_finalize = self.stabilizer.finish(track)
             if not should_finalize:
                 continue
-            if track.decision is None:
-                self._evaluate_track(track)
-            inspection = self._finalize_track(track)
-            if inspection.event_id in self.pending_events:
-                continue
-            self.pending_events[inspection.event_id] = PendingEvent(inspection=inspection, track=track)
-            self._flush_pending_events(force=True)
+            self._queue_finalized_event(track)
 
     def _evaluate_track(self, track: TrackState) -> None:
         contamination: ContaminationResult | None = None
-        if track.best_snapshot is not None and track.best_snapshot.image is not None and track.label.lower() == "metal":
-            contamination = self.contamination_evaluator.evaluate(track.best_snapshot.image, track.best_snapshot.bbox)
+        if (
+            track.best_in_zone_snapshot is not None
+            and track.best_in_zone_snapshot.image is not None
+            and track.label.lower() == "metal"
+        ):
+            contamination = self.contamination_evaluator.evaluate(
+                track.best_in_zone_snapshot.image,
+                track.best_in_zone_snapshot.bbox,
+            )
         decision = self.decision_engine.evaluate(contamination)
         self.stabilizer.mark_evaluated(track, contamination=contamination, decision=decision)
 
     def _finalize_track(self, track: TrackState) -> FinalizedInspection:
-        snapshot = track.best_snapshot or track.latest_snapshot
+        snapshot = track.best_in_zone_snapshot or track.best_snapshot or track.latest_snapshot
         if snapshot is None or track.decision is None:
             raise RuntimeError("Cannot finalize a track without a snapshot and decision.")
 
@@ -186,6 +194,27 @@ class EdgeRuntime:
             contamination=track.contamination,
             inspection_outcome={},
         )
+
+    def _queue_finalized_event(self, track: TrackState) -> None:
+        inspection = self._finalize_track(track)
+        if inspection.event_id in self.pending_events:
+            return
+        self.stabilizer.mark_event_queued(track)
+        self.pending_events[inspection.event_id] = PendingEvent(inspection=inspection, track=track)
+        self._flush_pending_events(force=True)
+
+    def _update_track_zone(self, track: TrackState, frame) -> bool:
+        snapshot = track.latest_snapshot
+        if snapshot is None or snapshot.frame_index != frame.index:
+            return False
+
+        in_zone = is_bbox_center_in_zone(
+            snapshot.bbox,
+            frame_width=snapshot.frame_width,
+            frame_height=snapshot.frame_height,
+            zone=self.config.evaluation_zone,
+        )
+        return track.update_evaluation_zone(frame=frame, in_zone=in_zone)
 
     def _flush_pending_events(self, *, force: bool = False) -> None:
         now = self.monotonic()
@@ -227,13 +256,37 @@ class EdgeRuntime:
         import cv2
 
         canvas = frame.image.copy()
+        zone_x1, zone_y1, zone_x2, zone_y2 = zone_bounds_to_pixels(
+            frame_width=frame.width,
+            frame_height=frame.height,
+            zone=self.config.evaluation_zone,
+        )
+        cv2.rectangle(canvas, (zone_x1, zone_y1), (zone_x2, zone_y2), (255, 200, 0), 2)
+        cv2.putText(
+            canvas,
+            "Evaluation Zone",
+            (zone_x1, max(20, zone_y1 - 10)),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.6,
+            (255, 200, 0),
+            2,
+        )
+
         for track in self.tracks.active_tracks:
             if track.latest_snapshot is None:
                 continue
             x1, y1, x2, y2 = track.latest_snapshot.bbox.to_int_tuple()
-            color = (0, 255, 255) if track.state in {"stable", "evaluated"} else (0, 255, 0)
+            if track.state == "emitted":
+                color = (255, 0, 255)
+            elif track.state == "evaluated":
+                color = (0, 255, 255)
+            elif track.in_evaluation_zone:
+                color = (0, 165, 255)
+            else:
+                color = (0, 255, 0)
             cv2.rectangle(canvas, (x1, y1), (x2, y2), color, 2)
-            label = f"{track.object_id} {track.state} {track.confidence:.2f}"
+            zone_text = " in-zone" if track.in_evaluation_zone else ""
+            label = f"{track.object_id} {track.state}{zone_text} z={track.in_zone_consecutive_hits} {track.confidence:.2f}"
             cv2.putText(canvas, label, (x1, max(20, y1 - 8)), cv2.FONT_HERSHEY_SIMPLEX, 0.55, color, 2)
 
         cv2.putText(

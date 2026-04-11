@@ -19,7 +19,7 @@ from brain.database.repository import BrainRepository
 from brain.models.schema import parse_heartbeat_payload, parse_inference_payload
 from edge.config import EdgeConfig, InspectionZoneConfig, ThresholdConfig
 from edge.decision import DecisionEngine
-from edge.filtering import DetectionFilter
+from edge.filtering import DetectionFilter, is_bbox_center_in_zone
 from edge.payloads import build_event_id, map_event_payload, map_heartbeat_payload
 from edge.runtime import EdgeRuntime
 from edge.stabilization import TrackStabilizer
@@ -35,6 +35,8 @@ class EdgeConfigAndPayloadTests(unittest.TestCase):
         self.assertEqual(config.event_endpoint_url, "http://127.0.0.1:8000/api/inference")
         self.assertEqual(config.heartbeat_endpoint_url, "http://127.0.0.1:8000/api/heartbeat")
         self.assertEqual(config.allowed_classes, ("Metal",))
+        self.assertEqual(config.thresholds.min_in_zone_frames_for_evaluation, 2)
+        self.assertEqual(config.evaluation_zone, InspectionZoneConfig(x1=0.20, y1=0.55, x2=0.80, y2=0.95))
 
     def test_event_payload_matches_brain_v1_shape(self) -> None:
         inspection = FinalizedInspection(
@@ -90,19 +92,17 @@ class EdgeConfigAndPayloadTests(unittest.TestCase):
 
 
 class FilteringAndDecisionTests(unittest.TestCase):
-    def test_filter_enforces_confidence_class_zone_and_size(self) -> None:
+    def test_filter_enforces_confidence_class_and_size(self) -> None:
         frame = _make_frame(index=0, width=100, height=100)
         detections = [
             Detection(label="Metal", confidence=0.95, class_id=1, bbox=BBox(30, 30, 60, 60)),
             Detection(label="Metal", confidence=0.60, class_id=1, bbox=BBox(30, 30, 60, 60)),
             Detection(label="Glass", confidence=0.96, class_id=2, bbox=BBox(30, 30, 60, 60)),
-            Detection(label="Metal", confidence=0.97, class_id=1, bbox=BBox(80, 80, 95, 95)),
             Detection(label="Metal", confidence=0.99, class_id=1, bbox=BBox(40, 40, 42, 42)),
         ]
         detection_filter = DetectionFilter(
             confidence_threshold=0.70,
             allowed_classes=("Metal",),
-            inspection_zone=InspectionZoneConfig(x1=0.2, y1=0.2, x2=0.8, y2=0.8),
             min_size_ratio=0.01,
         )
 
@@ -111,6 +111,25 @@ class FilteringAndDecisionTests(unittest.TestCase):
         self.assertEqual(len(filtered), 1)
         self.assertEqual(filtered[0].label, "Metal")
         self.assertEqual(filtered[0].confidence, 0.95)
+
+    def test_zone_helper_uses_bbox_center(self) -> None:
+        zone = InspectionZoneConfig(x1=0.2, y1=0.55, x2=0.8, y2=0.95)
+        self.assertTrue(
+            is_bbox_center_in_zone(
+                BBox(20, 50, 60, 90),
+                frame_width=100,
+                frame_height=100,
+                zone=zone,
+            )
+        )
+        self.assertFalse(
+            is_bbox_center_in_zone(
+                BBox(20, 20, 60, 60),
+                frame_width=100,
+                frame_height=100,
+                zone=zone,
+            )
+        )
 
     def test_decision_engine_thresholds(self) -> None:
         engine = DecisionEngine(review_threshold=0.40, reject_threshold=0.70)
@@ -135,7 +154,7 @@ class FilteringAndDecisionTests(unittest.TestCase):
 class TrackingLifecycleTests(unittest.TestCase):
     def test_stable_track_exits_after_missing_frames(self) -> None:
         manager = TrackManager(iou_threshold=0.30, max_missed_frames=2)
-        stabilizer = TrackStabilizer(stable_after_frames=2)
+        stabilizer = TrackStabilizer(stable_after_frames=2, min_in_zone_frames_for_evaluation=2)
         detection = Detection(label="Metal", confidence=0.9, class_id=1, bbox=BBox(10, 10, 40, 40))
 
         active, finished = manager.update(_make_frame(index=0), [detection])
@@ -163,7 +182,7 @@ class TrackingLifecycleTests(unittest.TestCase):
 
     def test_tentative_track_expires_without_event(self) -> None:
         manager = TrackManager(iou_threshold=0.30, max_missed_frames=2)
-        stabilizer = TrackStabilizer(stable_after_frames=2)
+        stabilizer = TrackStabilizer(stable_after_frames=2, min_in_zone_frames_for_evaluation=2)
         detection = Detection(label="Metal", confidence=0.9, class_id=1, bbox=BBox(10, 10, 40, 40))
 
         active, finished = manager.update(_make_frame(index=0), [detection])
@@ -213,11 +232,13 @@ class TransportTests(unittest.TestCase):
 
 class RuntimeTests(unittest.TestCase):
     def test_runtime_retries_same_event_id_until_accepted(self) -> None:
-        frames = [_make_frame(index=index) for index in range(4)]
+        frames = [_make_frame(index=index, width=100, height=100) for index in range(5)]
         detector = SequenceDetector(
             {
-                0: [Detection(label="Metal", confidence=0.92, class_id=1, bbox=BBox(10, 10, 60, 60))],
-                1: [Detection(label="Metal", confidence=0.93, class_id=1, bbox=BBox(10, 10, 60, 60))],
+                0: [Detection(label="Metal", confidence=0.90, class_id=1, bbox=BBox(20, 20, 60, 60))],
+                1: [Detection(label="Metal", confidence=0.92, class_id=1, bbox=BBox(20, 40, 60, 80))],
+                2: [Detection(label="Metal", confidence=0.93, class_id=1, bbox=BBox(20, 45, 60, 85))],
+                3: [Detection(label="Metal", confidence=0.91, class_id=1, bbox=BBox(20, 25, 60, 65))],
             }
         )
         transport = ScriptedTransport(
@@ -242,13 +263,16 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual({payload["event_id"] for payload in transport.event_payloads}, {transport.event_payloads[0]["event_id"]})
         self.assertEqual(len(runtime.pending_events), 0)
         self.assertEqual(len(transport.heartbeat_payloads), 1)
+        self.assertEqual(transport.event_payloads[0]["objects"][0]["decision"], "Accept")
 
     def test_runtime_posts_event_and_heartbeat_to_brain_server(self) -> None:
-        frames = [_make_frame(index=index) for index in range(4)]
+        frames = [_make_frame(index=index, width=100, height=100) for index in range(5)]
         detector = SequenceDetector(
             {
-                0: [Detection(label="Metal", confidence=0.92, class_id=1, bbox=BBox(10, 10, 60, 60))],
-                1: [Detection(label="Metal", confidence=0.93, class_id=1, bbox=BBox(10, 10, 60, 60))],
+                0: [Detection(label="Metal", confidence=0.90, class_id=1, bbox=BBox(20, 20, 60, 60))],
+                1: [Detection(label="Metal", confidence=0.92, class_id=1, bbox=BBox(20, 40, 60, 80))],
+                2: [Detection(label="Metal", confidence=0.93, class_id=1, bbox=BBox(20, 45, 60, 85))],
+                3: [Detection(label="Metal", confidence=0.91, class_id=1, bbox=BBox(20, 25, 60, 65))],
             }
         )
 
@@ -280,6 +304,75 @@ class RuntimeTests(unittest.TestCase):
             self.assertEqual(recent_event["device_id"], config.device_id)
             self.assertEqual(overview["active_devices"], 1)
             self.assertEqual(overview["devices"][0]["device_id"], config.device_id)
+
+    def test_runtime_does_not_evaluate_before_zone_entry(self) -> None:
+        frames = [_make_frame(index=index, width=100, height=100) for index in range(4)]
+        detector = SequenceDetector(
+            {
+                0: [Detection(label="Metal", confidence=0.90, class_id=1, bbox=BBox(20, 10, 60, 50))],
+                1: [Detection(label="Metal", confidence=0.91, class_id=1, bbox=BBox(20, 12, 60, 52))],
+            }
+        )
+        evaluator = CountingContaminationEvaluator()
+        transport = ScriptedTransport([])
+        runtime = EdgeRuntime(
+            _build_test_config(),
+            camera=FrameSequenceCamera(frames),
+            detector=detector,
+            contamination_evaluator=evaluator,
+            transport=transport,
+        )
+
+        runtime.run(max_frames=len(frames))
+
+        self.assertEqual(evaluator.calls, 0)
+        self.assertEqual(len(transport.event_payloads), 0)
+
+    def test_runtime_emits_once_after_lingering_in_zone_then_exit(self) -> None:
+        frames = [_make_frame(index=index, width=100, height=100) for index in range(7)]
+        detector = SequenceDetector(
+            {
+                0: [Detection(label="Metal", confidence=0.90, class_id=1, bbox=BBox(20, 20, 60, 60))],
+                1: [Detection(label="Metal", confidence=0.92, class_id=1, bbox=BBox(20, 40, 60, 80))],
+                2: [Detection(label="Metal", confidence=0.93, class_id=1, bbox=BBox(20, 45, 60, 85))],
+                3: [Detection(label="Metal", confidence=0.91, class_id=1, bbox=BBox(20, 46, 60, 86))],
+                4: [Detection(label="Metal", confidence=0.90, class_id=1, bbox=BBox(20, 44, 60, 84))],
+                5: [Detection(label="Metal", confidence=0.89, class_id=1, bbox=BBox(20, 24, 60, 64))],
+            }
+        )
+        runtime = EdgeRuntime(
+            _build_test_config(),
+            camera=FrameSequenceCamera(frames),
+            detector=detector,
+            contamination_evaluator=FixedContaminationEvaluator(),
+            transport=ScriptedTransport([]),
+        )
+
+        runtime.run(max_frames=len(frames))
+
+        self.assertEqual(len(runtime.transport.event_payloads), 1)
+
+    def test_runtime_emits_on_finish_if_evaluated_track_disappears_in_zone(self) -> None:
+        frames = [_make_frame(index=index, width=100, height=100) for index in range(5)]
+        detector = SequenceDetector(
+            {
+                0: [Detection(label="Metal", confidence=0.90, class_id=1, bbox=BBox(20, 20, 60, 60))],
+                1: [Detection(label="Metal", confidence=0.92, class_id=1, bbox=BBox(20, 40, 60, 80))],
+                2: [Detection(label="Metal", confidence=0.93, class_id=1, bbox=BBox(20, 45, 60, 85))],
+            }
+        )
+        transport = ScriptedTransport([])
+        runtime = EdgeRuntime(
+            _build_test_config(),
+            camera=FrameSequenceCamera(frames),
+            detector=detector,
+            contamination_evaluator=FixedContaminationEvaluator(),
+            transport=transport,
+        )
+
+        runtime.run(max_frames=len(frames))
+
+        self.assertEqual(len(transport.event_payloads), 1)
 
 
 class FakeResponse:
@@ -343,13 +436,21 @@ class SequenceDetector:
 
 
 class FixedContaminationEvaluator:
+    def __init__(self) -> None:
+        self.calls = 0
+
     def evaluate(self, image, bbox: BBox) -> ContaminationResult:
         del image, bbox
+        self.calls += 1
         return ContaminationResult(
             dirty_probability=0.12,
             clean_probability=0.88,
             applied=True,
         )
+
+
+class CountingContaminationEvaluator(FixedContaminationEvaluator):
+    pass
 
 
 class ScriptedTransport:
@@ -440,11 +541,13 @@ def _build_test_config(*, base_url: str = "http://127.0.0.1:8000") -> EdgeConfig
         heartbeat_interval_seconds=15.0,
         pending_retry_delay_seconds=0.0,
         allowed_classes=("Metal",),
+        evaluation_zone=InspectionZoneConfig(x1=0.2, y1=0.55, x2=0.8, y2=0.95),
         thresholds=ThresholdConfig(
             confidence=0.70,
             iou_match=0.30,
             stable_after_frames=2,
             max_missed_frames=2,
+            min_in_zone_frames_for_evaluation=2,
             dirty_review_threshold=0.40,
             dirty_reject_threshold=0.70,
             min_size_ratio=None,
