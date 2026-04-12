@@ -2,3 +2,4 @@
 .venv/
 __pycache__/
 brain/data/*.db
+edge_debug/

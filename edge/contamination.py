@@ -22,6 +22,16 @@ def build_cnn(*, num_classes: int = 2) -> nn.Module:
     return model
 
 
+def extract_evaluation_crop(image, bbox: BBox, *, pad_ratio: float = 0.05):
+    frame_height, frame_width = image.shape[:2]
+    crop_bbox = bbox.expand(pad_ratio, frame_width, frame_height)
+    x1, y1, x2, y2 = crop_bbox.to_int_tuple()
+    crop = image[y1:y2, x1:x2]
+    if crop.size == 0:
+        return None
+    return crop
+
+
 class MetalContaminationEvaluator:
     def __init__(self, *, weights_path: str, device: torch.device | None = None, image_size: int = 224) -> None:
         self.device = device or pick_torch_device()
@@ -39,11 +49,8 @@ class MetalContaminationEvaluator:
         )
 
     def evaluate(self, image, bbox: BBox) -> ContaminationResult:
-        frame_height, frame_width = image.shape[:2]
-        crop_bbox = bbox.expand(0.05, frame_width, frame_height)
-        x1, y1, x2, y2 = crop_bbox.to_int_tuple()
-        crop = image[y1:y2, x1:x2]
-        if crop.size == 0:
+        crop = extract_evaluation_crop(image, bbox)
+        if crop is None:
             return ContaminationResult(applied=False, reason="empty_crop")
 
         inputs = self.preprocess(crop).unsqueeze(0).to(self.device)

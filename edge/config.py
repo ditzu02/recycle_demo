@@ -52,6 +52,13 @@ InspectionZoneConfig = EvaluationZoneConfig
 
 
 @dataclass
+class DebugConfig:
+    save_images: bool = False
+    output_dir: Path = REPO_ROOT / "edge_debug"
+    save_annotated_frame: bool = True
+
+
+@dataclass
 class EdgeConfig:
     device_id: str = "edge_demo_01"
     brain_base_url: str = "http://127.0.0.1:8000"
@@ -70,6 +77,7 @@ class EdgeConfig:
     models: ModelConfig = field(default_factory=ModelConfig)
     thresholds: ThresholdConfig = field(default_factory=ThresholdConfig)
     evaluation_zone: EvaluationZoneConfig = field(default_factory=EvaluationZoneConfig)
+    debug: DebugConfig = field(default_factory=DebugConfig)
 
     @classmethod
     def from_env(cls) -> EdgeConfig:
@@ -124,6 +132,11 @@ class EdgeConfig:
                 min_size_ratio=_env_optional_float("EDGE_MIN_SIZE_RATIO"),
             ),
             evaluation_zone=_parse_zone(evaluation_zone_value),
+            debug=DebugConfig(
+                save_images=_env_bool("EDGE_DEBUG_SAVE_IMAGES", False),
+                output_dir=Path(os.getenv("EDGE_DEBUG_OUTPUT_DIR", str(REPO_ROOT / "edge_debug"))),
+                save_annotated_frame=_env_bool("EDGE_DEBUG_SAVE_ANNOTATED_FRAME", True),
+            ),
         )
 
     def validate(self) -> None:
@@ -174,6 +187,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--contamination-model-path")
     parser.add_argument("--source-type")
     parser.add_argument("--source-index", type=int)
+    parser.add_argument("--save-debug-images", action="store_true")
+    parser.add_argument("--debug-output-dir")
+    parser.add_argument("--no-debug-frame", action="store_true")
     parser.add_argument("--show", action="store_true")
     return parser
 
@@ -231,6 +247,12 @@ def build_config(argv: list[str] | None = None) -> EdgeConfig:
         config.source_type = args.source_type
     if args.source_index is not None:
         config.source_index = args.source_index
+    if args.save_debug_images:
+        config.debug.save_images = True
+    if args.debug_output_dir:
+        config.debug.output_dir = Path(args.debug_output_dir)
+    if args.no_debug_frame:
+        config.debug.save_annotated_frame = False
     if args.show:
         config.show_preview = True
 

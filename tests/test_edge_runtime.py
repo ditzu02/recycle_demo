@@ -37,6 +37,8 @@ class EdgeConfigAndPayloadTests(unittest.TestCase):
         self.assertEqual(config.allowed_classes, ("Metal",))
         self.assertEqual(config.thresholds.min_in_zone_frames_for_evaluation, 2)
         self.assertEqual(config.evaluation_zone, InspectionZoneConfig(x1=0.20, y1=0.55, x2=0.80, y2=0.95))
+        self.assertFalse(config.debug.save_images)
+        self.assertEqual(config.debug.output_dir.name, "edge_debug")
 
     def test_event_payload_matches_brain_v1_shape(self) -> None:
         inspection = FinalizedInspection(
@@ -373,6 +375,42 @@ class RuntimeTests(unittest.TestCase):
         runtime.run(max_frames=len(frames))
 
         self.assertEqual(len(transport.event_payloads), 1)
+
+    def test_runtime_saves_debug_images_for_finalized_event(self) -> None:
+        frames = [_make_frame(index=index, width=100, height=100) for index in range(7)]
+        detector = SequenceDetector(
+            {
+                0: [Detection(label="Metal", confidence=0.90, class_id=1, bbox=BBox(20, 20, 60, 60))],
+                1: [Detection(label="Metal", confidence=0.92, class_id=1, bbox=BBox(20, 40, 60, 80))],
+                2: [Detection(label="Metal", confidence=0.93, class_id=1, bbox=BBox(20, 45, 60, 85))],
+                3: [Detection(label="Metal", confidence=0.91, class_id=1, bbox=BBox(20, 46, 60, 86))],
+                4: [Detection(label="Metal", confidence=0.90, class_id=1, bbox=BBox(20, 44, 60, 84))],
+                5: [Detection(label="Metal", confidence=0.89, class_id=1, bbox=BBox(20, 24, 60, 64))],
+            }
+        )
+        transport = ScriptedTransport([])
+        with tempfile.TemporaryDirectory() as tempdir:
+            config = _build_test_config()
+            config.debug.save_images = True
+            config.debug.output_dir = Path(tempdir)
+            runtime = EdgeRuntime(
+                config,
+                camera=FrameSequenceCamera(frames),
+                detector=detector,
+                contamination_evaluator=FixedContaminationEvaluator(),
+                transport=transport,
+            )
+
+            runtime.run(max_frames=len(frames))
+
+            self.assertEqual(len(transport.event_payloads), 1)
+            event_id = transport.event_payloads[0]["event_id"]
+            saved_files = sorted(Path(tempdir).glob("*.png"))
+            self.assertEqual(len(saved_files), 2)
+            self.assertTrue(any(path.name.endswith("__crop.png") for path in saved_files))
+            self.assertTrue(any(path.name.endswith("__frame.png") for path in saved_files))
+            self.assertTrue(all(event_id in path.name for path in saved_files))
+            self.assertTrue(all(path.stat().st_size > 0 for path in saved_files))
 
 
 class FakeResponse:

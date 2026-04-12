@@ -59,6 +59,12 @@ Show the local preview window for desktop demos:
 ./.venv/bin/python -m edge --device-id edge_demo_01 --show
 ```
 
+Save local debug images for each finalized event:
+
+```bash
+./.venv/bin/python -m edge --device-id edge_demo_01 --show --save-debug-images
+```
+
 Point the runtime at a different brain host:
 
 ```bash
@@ -79,6 +85,8 @@ Useful runtime knobs:
 - `EDGE_MAX_MISSED_FRAMES`
 - `EDGE_MIN_IN_ZONE_FRAMES_FOR_EVALUATION`
 - `EDGE_EVALUATION_ZONE`
+- `EDGE_DEBUG_SAVE_IMAGES`
+- `EDGE_DEBUG_OUTPUT_DIR`
 - `EDGE_SHOW_PREVIEW`
 
 ### Edge Notes
@@ -89,6 +97,7 @@ Useful runtime knobs:
 - `EDGE_INSPECTION_ZONE` is still accepted as a compatibility alias for `EDGE_EVALUATION_ZONE`.
 - The runtime emits one finalized Brain-v1 event per completed tracked-object lifecycle.
 - A track is evaluated once per pass through the gate and emits once when it leaves the zone or disappears after evaluation.
+- When debug image saving is enabled, the runtime stores the finalized event's evaluation crop and an annotated frame in `edge_debug/` by default.
 - `event_id` includes the device id, a runtime session token, the finalized frame index, and the track number so retries stay stable without reusing ids across separate runs.
 - `inspection_outcome` is always included as an object and stays `{}` in this phase.
 - Heartbeats are sent to `POST /api/heartbeat`.

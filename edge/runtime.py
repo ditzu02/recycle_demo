@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import logging
+import re
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Callable
 
 from edge.config import EdgeConfig
+from edge.contamination import extract_evaluation_crop
 from edge.decision import DecisionEngine
 from edge.filtering import DetectionFilter, is_bbox_center_in_zone, zone_bounds_to_pixels
 from edge.payloads import build_event_id, map_event_payload, map_heartbeat_payload
@@ -199,6 +202,7 @@ class EdgeRuntime:
         inspection = self._finalize_track(track)
         if inspection.event_id in self.pending_events:
             return
+        self._save_debug_images(inspection, track)
         self.stabilizer.mark_event_queued(track)
         self.pending_events[inspection.event_id] = PendingEvent(inspection=inspection, track=track)
         self._flush_pending_events(force=True)
@@ -251,6 +255,91 @@ class EdgeRuntime:
         self._last_heartbeat_at = now
         if not result.accepted:
             LOGGER.warning("heartbeat send failed device_id=%s detail=%s", self.config.device_id, result.detail)
+
+    def _save_debug_images(self, inspection: FinalizedInspection, track: TrackState) -> None:
+        if not self.config.debug.save_images:
+            return
+
+        snapshot = track.best_in_zone_snapshot or track.best_snapshot or track.latest_snapshot
+        if snapshot is None or snapshot.image is None:
+            LOGGER.warning("debug image save skipped event_id=%s detail=missing_snapshot_image", inspection.event_id)
+            return
+
+        output_dir = self.config.debug.output_dir
+        output_dir.mkdir(parents=True, exist_ok=True)
+        file_stem = self._build_debug_file_stem(inspection)
+
+        try:
+            crop = extract_evaluation_crop(snapshot.image, snapshot.bbox)
+            if crop is not None:
+                self._write_debug_image(output_dir / f"{file_stem}__crop.png", crop)
+
+            if self.config.debug.save_annotated_frame:
+                annotated = self._build_debug_frame(snapshot.image, snapshot.bbox, inspection)
+                self._write_debug_image(output_dir / f"{file_stem}__frame.png", annotated)
+        except Exception:
+            LOGGER.exception("debug image save failed event_id=%s output_dir=%s", inspection.event_id, output_dir)
+
+    def _build_debug_file_stem(self, inspection: FinalizedInspection) -> str:
+        return "__".join(
+            [
+                self._sanitize_debug_token(inspection.event_id),
+                self._sanitize_debug_token(inspection.label),
+                self._sanitize_debug_token(inspection.decision.decision),
+            ]
+        )
+
+    def _build_debug_frame(self, image, bbox, inspection: FinalizedInspection):
+        import cv2
+
+        canvas = image.copy()
+        zone_x1, zone_y1, zone_x2, zone_y2 = zone_bounds_to_pixels(
+            frame_width=inspection.frame_width,
+            frame_height=inspection.frame_height,
+            zone=self.config.evaluation_zone,
+        )
+        cv2.rectangle(canvas, (zone_x1, zone_y1), (zone_x2, zone_y2), (255, 200, 0), 2)
+        cv2.putText(
+            canvas,
+            "Evaluation Zone",
+            (zone_x1, max(20, zone_y1 - 10)),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.6,
+            (255, 200, 0),
+            2,
+        )
+
+        x1, y1, x2, y2 = bbox.to_int_tuple()
+        cv2.rectangle(canvas, (x1, y1), (x2, y2), (0, 255, 255), 2)
+        cv2.putText(
+            canvas,
+            f"{inspection.label} {inspection.decision.decision} {inspection.confidence:.2f}",
+            (x1, max(20, y1 - 8)),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.55,
+            (0, 255, 255),
+            2,
+        )
+        cv2.putText(
+            canvas,
+            inspection.event_id,
+            (20, max(40, inspection.frame_height - 20)),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.55,
+            (255, 255, 255),
+            2,
+        )
+        return canvas
+
+    def _write_debug_image(self, path: Path, image) -> None:
+        import cv2
+
+        if not cv2.imwrite(str(path), image):
+            raise OSError(f"failed to write image: {path}")
+
+    def _sanitize_debug_token(self, value: str) -> str:
+        token = re.sub(r"[^A-Za-z0-9._-]+", "-", value.strip())
+        return token.strip("-._") or "unknown"
 
     def _render_preview(self, frame) -> bool:
         import cv2
