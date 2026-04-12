@@ -36,6 +36,7 @@ class EdgeConfigAndPayloadTests(unittest.TestCase):
         self.assertEqual(config.heartbeat_endpoint_url, "http://127.0.0.1:8000/api/heartbeat")
         self.assertEqual(config.allowed_classes, ("Metal",))
         self.assertEqual(config.thresholds.min_in_zone_frames_for_evaluation, 2)
+        self.assertEqual(config.thresholds.label_accept_confidence, 0.85)
         self.assertEqual(config.evaluation_zone, InspectionZoneConfig(x1=0.20, y1=0.55, x2=0.80, y2=0.95))
         self.assertFalse(config.debug.save_images)
         self.assertEqual(config.debug.output_dir.name, "edge_debug")
@@ -82,6 +83,38 @@ class EdgeConfigAndPayloadTests(unittest.TestCase):
         parsed = parse_inference_payload(payload)
         self.assertEqual(parsed.device_id, "edge_demo_01")
         self.assertEqual(parsed.objects[0].bbox, (100.0, 120.0, 220.0, 260.0))
+
+    def test_event_payload_uses_neutral_probabilities_when_contamination_missing(self) -> None:
+        inspection = FinalizedInspection(
+            event_id=build_event_id(device_id="edge_demo_01", frame_index=200, track_number=2),
+            device_id="edge_demo_01",
+            source_type="edge_node",
+            source_index=0,
+            timestamp=datetime(2026, 3, 28, 11, 15, 30, tzinfo=UTC),
+            frame_index=200,
+            frame_width=1280,
+            frame_height=720,
+            object_id="track-0002",
+            track_number=2,
+            class_id=2,
+            label="Plastic",
+            confidence=0.93,
+            bbox=BBox(10, 20, 60, 80),
+            decision=DecisionResult(
+                decision="Accept",
+                contamination_status="UNCERTAIN",
+                score=85,
+                reason="supported_non_metal_confidence>=0.85",
+            ),
+            contamination=None,
+            inspection_outcome={},
+        )
+
+        payload = map_event_payload(inspection)
+
+        self.assertEqual(payload["objects"][0]["dirty_probability"], 0.5)
+        self.assertEqual(payload["objects"][0]["clean_probability"], 0.5)
+        self.assertNotIn("refinement", payload["objects"][0])
 
     def test_heartbeat_payload_matches_brain_v1_shape(self) -> None:
         payload = map_heartbeat_payload(
@@ -134,23 +167,85 @@ class FilteringAndDecisionTests(unittest.TestCase):
         )
 
     def test_decision_engine_thresholds(self) -> None:
-        engine = DecisionEngine(review_threshold=0.40, reject_threshold=0.70)
+        engine = DecisionEngine(
+            review_threshold=0.40,
+            reject_threshold=0.70,
+            label_accept_confidence=0.85,
+        )
 
         self.assertEqual(
-            engine.evaluate(ContaminationResult(dirty_probability=0.39, clean_probability=0.61, applied=True)).decision,
+            engine.evaluate(
+                label="Metal",
+                confidence=0.95,
+                contamination=ContaminationResult(dirty_probability=0.39, clean_probability=0.61, applied=True),
+            ).decision,
             "Accept",
         )
         self.assertEqual(
-            engine.evaluate(ContaminationResult(dirty_probability=0.40, clean_probability=0.60, applied=True)).decision,
+            engine.evaluate(
+                label="Metal",
+                confidence=0.95,
+                contamination=ContaminationResult(dirty_probability=0.40, clean_probability=0.60, applied=True),
+            ).decision,
             "Review",
         )
         self.assertEqual(
-            engine.evaluate(ContaminationResult(dirty_probability=0.70, clean_probability=0.30, applied=True)).decision,
+            engine.evaluate(
+                label="Metal",
+                confidence=0.95,
+                contamination=ContaminationResult(dirty_probability=0.70, clean_probability=0.30, applied=True),
+            ).decision,
             "Reject",
         )
-        unavailable = engine.evaluate(ContaminationResult(applied=False, reason="missing_crop"))
+        unavailable = engine.evaluate(
+            label="Metal",
+            confidence=0.95,
+            contamination=engine.canonicalize_contamination(
+                label="Metal",
+                contamination=ContaminationResult(applied=False, reason="missing_crop"),
+            ),
+        )
         self.assertEqual(unavailable.decision, "Review")
         self.assertEqual(unavailable.contamination_status, "UNCERTAIN")
+
+    def test_decision_engine_downgrades_low_confidence_metal_to_review(self) -> None:
+        engine = DecisionEngine(
+            review_threshold=0.40,
+            reject_threshold=0.70,
+            label_accept_confidence=0.85,
+        )
+
+        result = engine.evaluate(
+            label="Metal",
+            confidence=0.78,
+            contamination=ContaminationResult(dirty_probability=0.10, clean_probability=0.90, applied=True),
+        )
+
+        self.assertEqual(result.decision, "Review")
+        self.assertEqual(result.contamination_status, "UNCERTAIN")
+
+    def test_decision_engine_supports_non_metal_label_only_path(self) -> None:
+        engine = DecisionEngine(
+            review_threshold=0.40,
+            reject_threshold=0.70,
+            label_accept_confidence=0.85,
+        )
+
+        high_confidence = engine.evaluate(
+            label="Plastic",
+            confidence=0.91,
+            contamination=engine.canonicalize_contamination(label="Plastic", contamination=None),
+        )
+        low_confidence = engine.evaluate(
+            label="Glass",
+            confidence=0.76,
+            contamination=engine.canonicalize_contamination(label="Glass", contamination=None),
+        )
+
+        self.assertEqual(high_confidence.decision, "Accept")
+        self.assertEqual(high_confidence.contamination_status, "UNCERTAIN")
+        self.assertEqual(low_confidence.decision, "Review")
+        self.assertEqual(low_confidence.contamination_status, "UNCERTAIN")
 
 
 class TrackingLifecycleTests(unittest.TestCase):
@@ -412,6 +507,42 @@ class RuntimeTests(unittest.TestCase):
             self.assertTrue(all(event_id in path.name for path in saved_files))
             self.assertTrue(all(path.stat().st_size > 0 for path in saved_files))
 
+    def test_runtime_accepts_supported_non_metal_without_running_cnn(self) -> None:
+        frames = [_make_frame(index=index, width=100, height=100) for index in range(7)]
+        detector = SequenceDetector(
+            {
+                0: [Detection(label="Plastic", confidence=0.90, class_id=2, bbox=BBox(20, 20, 60, 60))],
+                1: [Detection(label="Plastic", confidence=0.92, class_id=2, bbox=BBox(20, 40, 60, 80))],
+                2: [Detection(label="Plastic", confidence=0.94, class_id=2, bbox=BBox(20, 45, 60, 85))],
+                3: [Detection(label="Plastic", confidence=0.93, class_id=2, bbox=BBox(20, 46, 60, 86))],
+                4: [Detection(label="Plastic", confidence=0.91, class_id=2, bbox=BBox(20, 44, 60, 84))],
+                5: [Detection(label="Plastic", confidence=0.90, class_id=2, bbox=BBox(20, 24, 60, 64))],
+            }
+        )
+        evaluator = CountingContaminationEvaluator()
+        transport = ScriptedTransport([])
+        config = _build_test_config()
+        config.allowed_classes = ("Metal", "Plastic")
+        runtime = EdgeRuntime(
+            config,
+            camera=FrameSequenceCamera(frames),
+            detector=detector,
+            contamination_evaluator=evaluator,
+            transport=transport,
+        )
+
+        runtime.run(max_frames=len(frames))
+
+        self.assertEqual(evaluator.calls, 0)
+        self.assertEqual(len(transport.event_payloads), 1)
+        event_object = transport.event_payloads[0]["objects"][0]
+        self.assertEqual(event_object["label"], "Plastic")
+        self.assertEqual(event_object["decision"], "Accept")
+        self.assertEqual(event_object["contamination_status"], "UNCERTAIN")
+        self.assertEqual(event_object["dirty_probability"], 0.5)
+        self.assertEqual(event_object["clean_probability"], 0.5)
+        self.assertNotIn("refinement", event_object)
+
 
 class FakeResponse:
     def __init__(self, status: int, payload: dict):
@@ -586,6 +717,7 @@ def _build_test_config(*, base_url: str = "http://127.0.0.1:8000") -> EdgeConfig
             stable_after_frames=2,
             max_missed_frames=2,
             min_in_zone_frames_for_evaluation=2,
+            label_accept_confidence=0.85,
             dirty_review_threshold=0.40,
             dirty_reject_threshold=0.70,
             min_size_ratio=None,

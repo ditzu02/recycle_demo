@@ -106,6 +106,15 @@ class ContaminationResult:
     applied: bool = False
     reason: str | None = None
 
+    @classmethod
+    def neutral(cls, *, reason: str) -> ContaminationResult:
+        return cls(
+            dirty_probability=0.5,
+            clean_probability=0.5,
+            applied=False,
+            reason=reason,
+        )
+
     @property
     def available(self) -> bool:
         return self.dirty_probability is not None and self.clean_probability is not None

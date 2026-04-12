@@ -32,6 +32,7 @@ class ThresholdConfig:
     stable_after_frames: int = 3
     max_missed_frames: int = 5
     min_in_zone_frames_for_evaluation: int = 2
+    label_accept_confidence: float = 0.85
     dirty_review_threshold: float = 0.40
     dirty_reject_threshold: float = 0.70
     min_size_ratio: float | None = None
@@ -127,6 +128,7 @@ class EdgeConfig:
                 stable_after_frames=_env_int("EDGE_STABLE_AFTER_FRAMES", 3),
                 max_missed_frames=_env_int("EDGE_MAX_MISSED_FRAMES", 5),
                 min_in_zone_frames_for_evaluation=_env_int("EDGE_MIN_IN_ZONE_FRAMES_FOR_EVALUATION", 2),
+                label_accept_confidence=_env_float("EDGE_LABEL_ACCEPT_CONFIDENCE", 0.85),
                 dirty_review_threshold=_env_float("EDGE_DIRTY_REVIEW_THRESHOLD", 0.40),
                 dirty_reject_threshold=_env_float("EDGE_DIRTY_REJECT_THRESHOLD", 0.70),
                 min_size_ratio=_env_optional_float("EDGE_MIN_SIZE_RATIO"),
@@ -148,6 +150,8 @@ class EdgeConfig:
             raise ValueError("max_missed_frames must be at least 1.")
         if self.thresholds.min_in_zone_frames_for_evaluation < 1:
             raise ValueError("min_in_zone_frames_for_evaluation must be at least 1.")
+        if not 0.0 <= self.thresholds.label_accept_confidence <= 1.0:
+            raise ValueError("label_accept_confidence must be within [0, 1].")
         if self.thresholds.dirty_review_threshold > self.thresholds.dirty_reject_threshold:
             raise ValueError("dirty review threshold must be less than or equal to dirty reject threshold.")
         zone = self.evaluation_zone
@@ -179,6 +183,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--stable-frames", type=int)
     parser.add_argument("--missed-frames", type=int)
     parser.add_argument("--min-in-zone-frames", type=int)
+    parser.add_argument("--label-accept-confidence", type=float)
     parser.add_argument("--min-size-ratio", type=float)
     parser.add_argument("--allowed-classes")
     parser.add_argument("--evaluation-zone", help="Normalized x1,y1,x2,y2 rectangle used as the evaluation gate.")
@@ -231,6 +236,8 @@ def build_config(argv: list[str] | None = None) -> EdgeConfig:
         config.thresholds.max_missed_frames = args.missed_frames
     if args.min_in_zone_frames is not None:
         config.thresholds.min_in_zone_frames_for_evaluation = args.min_in_zone_frames
+    if args.label_accept_confidence is not None:
+        config.thresholds.label_accept_confidence = args.label_accept_confidence
     if args.min_size_ratio is not None:
         config.thresholds.min_size_ratio = args.min_size_ratio
     if args.allowed_classes:

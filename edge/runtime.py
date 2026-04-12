@@ -69,6 +69,7 @@ class EdgeRuntime:
         self.decision_engine = DecisionEngine(
             review_threshold=config.thresholds.dirty_review_threshold,
             reject_threshold=config.thresholds.dirty_reject_threshold,
+            label_accept_confidence=config.thresholds.label_accept_confidence,
         )
         self.session_identifier = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
         self.pending_events: dict[str, PendingEvent] = {}
@@ -122,11 +123,12 @@ class EdgeRuntime:
                 image_size=self.config.models.yolo_image_size,
             )
         if self.contamination_evaluator is None:
-            from edge.contamination import MetalContaminationEvaluator
+            if self._supports_metal_refinement():
+                from edge.contamination import MetalContaminationEvaluator
 
-            self.contamination_evaluator = MetalContaminationEvaluator(
-                weights_path=str(self.config.models.contamination_model_path),
-            )
+                self.contamination_evaluator = MetalContaminationEvaluator(
+                    weights_path=str(self.config.models.contamination_model_path),
+                )
 
     def _process_frame(self, frame) -> None:
         detections = self.detector.detect(frame)
@@ -150,17 +152,25 @@ class EdgeRuntime:
             self._queue_finalized_event(track)
 
     def _evaluate_track(self, track: TrackState) -> None:
+        snapshot = track.best_in_zone_snapshot or track.best_snapshot or track.latest_snapshot
+        label_confidence = track.confidence if snapshot is None else snapshot.confidence
         contamination: ContaminationResult | None = None
         if (
-            track.best_in_zone_snapshot is not None
-            and track.best_in_zone_snapshot.image is not None
-            and track.label.lower() == "metal"
+            snapshot is not None
+            and snapshot.image is not None
+            and self._is_metal_label(track.label)
+            and self.contamination_evaluator is not None
         ):
             contamination = self.contamination_evaluator.evaluate(
-                track.best_in_zone_snapshot.image,
-                track.best_in_zone_snapshot.bbox,
+                snapshot.image,
+                snapshot.bbox,
             )
-        decision = self.decision_engine.evaluate(contamination)
+        contamination = self.decision_engine.canonicalize_contamination(label=track.label, contamination=contamination)
+        decision = self.decision_engine.evaluate(
+            label=track.label,
+            confidence=label_confidence,
+            contamination=contamination,
+        )
         self.stabilizer.mark_evaluated(track, contamination=contamination, decision=decision)
 
     def _finalize_track(self, track: TrackState) -> FinalizedInspection:
@@ -340,6 +350,12 @@ class EdgeRuntime:
     def _sanitize_debug_token(self, value: str) -> str:
         token = re.sub(r"[^A-Za-z0-9._-]+", "-", value.strip())
         return token.strip("-._") or "unknown"
+
+    def _is_metal_label(self, label: str) -> bool:
+        return label.strip().lower() == "metal"
+
+    def _supports_metal_refinement(self) -> bool:
+        return not self.config.allowed_classes or any(self._is_metal_label(label) for label in self.config.allowed_classes)
 
     def _render_preview(self, frame) -> bool:
         import cv2

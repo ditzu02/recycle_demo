@@ -15,7 +15,7 @@ Current v1 scope:
 - camera capture via OpenCV
 - YOLOv8 bbox detections
 - full-frame tracking with a designated evaluation zone gate
-- metal-only contamination evaluation inside that gate
+- multi-class detection with metal-only contamination evaluation inside that gate
 - lightweight per-object temporal tracking and stabilization
 - explicit `Accept` / `Review` / `Reject` decisions
 - canonical Brain-v1 event and heartbeat payload mapping
@@ -84,6 +84,8 @@ Useful runtime knobs:
 - `EDGE_STABLE_AFTER_FRAMES`
 - `EDGE_MAX_MISSED_FRAMES`
 - `EDGE_MIN_IN_ZONE_FRAMES_FOR_EVALUATION`
+- `EDGE_LABEL_ACCEPT_CONFIDENCE`
+- `EDGE_ALLOWED_CLASSES`
 - `EDGE_EVALUATION_ZONE`
 - `EDGE_DEBUG_SAVE_IMAGES`
 - `EDGE_DEBUG_OUTPUT_DIR`
@@ -92,7 +94,10 @@ Useful runtime knobs:
 ### Edge Notes
 
 - The current demo runtime tracks the whole frame, but only evaluates objects after they become stable and dwell inside the evaluation zone.
-- The current demo runtime filters to `Metal` by default because the contamination CNN is metal-specific.
+- The runtime still defaults to `Metal` for backward compatibility, but `EDGE_ALLOWED_CLASSES` can now be widened to supported non-metal labels such as `Plastic` or `Glass`.
+- The contamination CNN is only used for tracks whose final label is `Metal`.
+- Supported non-metal classes are decided from stability plus label confidence only; they do not claim CNN-based contamination refinement.
+- The default high-confidence accept threshold for label-driven decisions is `0.85`.
 - The default evaluation zone is a normalized lower-frame rectangle: `0.20,0.55,0.80,0.95`.
 - `EDGE_INSPECTION_ZONE` is still accepted as a compatibility alias for `EDGE_EVALUATION_ZONE`.
 - The runtime emits one finalized Brain-v1 event per completed tracked-object lifecycle.

@@ -23,6 +23,7 @@ def build_event_id(
 
 def map_event_payload(inspection: FinalizedInspection) -> dict[str, Any]:
     contamination = inspection.contamination
+    dirty_probability, clean_probability = _canonical_probabilities(contamination)
     object_payload: dict[str, Any] = {
         "object_id": inspection.object_id,
         "class_id": inspection.class_id,
@@ -32,8 +33,8 @@ def map_event_payload(inspection: FinalizedInspection) -> dict[str, Any]:
         "score": inspection.decision.score,
         "decision": inspection.decision.decision,
         "contamination_status": inspection.decision.contamination_status,
-        "dirty_probability": None if contamination is None else contamination.dirty_probability,
-        "clean_probability": None if contamination is None else contamination.clean_probability,
+        "dirty_probability": dirty_probability,
+        "clean_probability": clean_probability,
     }
     if contamination is not None and contamination.applied and contamination.available:
         object_payload["refinement"] = {
@@ -84,3 +85,13 @@ def _format_timestamp(timestamp: datetime) -> str:
     else:
         normalized = timestamp.astimezone(UTC)
     return normalized.replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _canonical_probabilities(contamination) -> tuple[float, float]:
+    if contamination is None:
+        return (0.5, 0.5)
+    dirty = contamination.dirty_probability
+    clean = contamination.clean_probability
+    if dirty is None or clean is None:
+        return (0.5, 0.5)
+    return (dirty, clean)
