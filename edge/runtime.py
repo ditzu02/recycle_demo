@@ -9,14 +9,13 @@ from pathlib import Path
 from typing import Callable
 
 from edge.config import EdgeConfig
-from edge.contamination import extract_evaluation_crop
 from edge.decision import DecisionEngine
 from edge.filtering import DetectionFilter, is_bbox_center_in_zone, zone_bounds_to_pixels
 from edge.payloads import build_event_id, map_event_payload, map_heartbeat_payload
 from edge.stabilization import TrackStabilizer
 from edge.tracking import TrackManager
 from edge.transport import BrainTransport
-from edge.types import ContaminationResult, FinalizedInspection, TrackState
+from edge.types import BBox, ContaminationResult, FinalizedInspection, TrackState
 
 
 LOGGER = logging.getLogger(__name__)
@@ -121,6 +120,8 @@ class EdgeRuntime:
             self.detector = YOLODetector(
                 model_path=str(self.config.models.yolo_model_path),
                 image_size=self.config.models.yolo_image_size,
+                confidence_floor=self.config.models.yolo_confidence_floor,
+                class_names=self.config.models.yolo_class_names,
             )
         if self.contamination_evaluator is None:
             if self._supports_metal_refinement():
@@ -142,29 +143,33 @@ class EdgeRuntime:
             self.stabilizer.advance(track)
             if self.stabilizer.should_evaluate(track):
                 self._evaluate_track(track)
+            if just_left_zone and self._has_pending_contamination_samples(track):
+                self._complete_metal_evaluation(track)
             if self.stabilizer.should_emit_on_zone_exit(track, just_left_zone=just_left_zone):
                 self._queue_finalized_event(track)
 
         for track in finished_tracks:
+            if self._has_pending_contamination_samples(track):
+                self._complete_metal_evaluation(track)
             should_finalize = self.stabilizer.finish(track)
             if not should_finalize:
                 continue
             self._queue_finalized_event(track)
 
     def _evaluate_track(self, track: TrackState) -> None:
+        if self._is_metal_label(track.label):
+            sample_possible = self._sample_metal_contamination(track)
+            if not sample_possible and not track.contamination_samples:
+                self._complete_metal_evaluation(track)
+                return
+            if len(track.contamination_samples) < self.config.thresholds.contamination_sample_count:
+                return
+            self._complete_metal_evaluation(track)
+            return
+
         snapshot = track.best_in_zone_snapshot or track.best_snapshot or track.latest_snapshot
         label_confidence = track.confidence if snapshot is None else snapshot.confidence
         contamination: ContaminationResult | None = None
-        if (
-            snapshot is not None
-            and snapshot.image is not None
-            and self._is_metal_label(track.label)
-            and self.contamination_evaluator is not None
-        ):
-            contamination = self.contamination_evaluator.evaluate(
-                snapshot.image,
-                snapshot.bbox,
-            )
         contamination = self.decision_engine.canonicalize_contamination(label=track.label, contamination=contamination)
         decision = self.decision_engine.evaluate(
             label=track.label,
@@ -172,6 +177,62 @@ class EdgeRuntime:
             contamination=contamination,
         )
         self.stabilizer.mark_evaluated(track, contamination=contamination, decision=decision)
+
+    def _sample_metal_contamination(self, track: TrackState) -> bool:
+        snapshot = track.latest_in_zone_snapshot or track.best_in_zone_snapshot
+        if (
+            snapshot is None
+            or snapshot.image is None
+            or self.contamination_evaluator is None
+        ):
+            return False
+
+        if snapshot.frame_index in track.contamination_sample_frame_indexes:
+            return True
+
+        sample = self._evaluate_contamination_crop(snapshot.image)
+        track.contamination_samples.append(sample)
+        track.contamination_sample_frame_indexes.add(snapshot.frame_index)
+        return True
+
+    def _complete_metal_evaluation(self, track: TrackState) -> None:
+        snapshot = track.best_in_zone_snapshot or track.best_snapshot or track.latest_snapshot
+        label_confidence = track.confidence if snapshot is None else snapshot.confidence
+        contamination = self._average_contamination_samples(track)
+        contamination = self.decision_engine.canonicalize_contamination(label=track.label, contamination=contamination)
+        decision = self.decision_engine.evaluate(
+            label=track.label,
+            confidence=label_confidence,
+            contamination=contamination,
+        )
+        self.stabilizer.mark_evaluated(track, contamination=contamination, decision=decision)
+
+    def _average_contamination_samples(self, track: TrackState) -> ContaminationResult:
+        available_samples = [
+            sample
+            for sample in track.contamination_samples
+            if sample.applied and sample.available
+        ]
+        if not available_samples:
+            return ContaminationResult(applied=False, reason="contamination_samples_unavailable")
+
+        sample_count = len(available_samples)
+        dirty_probability = sum(sample.dirty_probability or 0.0 for sample in available_samples) / sample_count
+        clean_probability = sum(sample.clean_probability or 0.0 for sample in available_samples) / sample_count
+        return ContaminationResult(
+            dirty_probability=dirty_probability,
+            clean_probability=clean_probability,
+            applied=True,
+            reason=f"averaged_{sample_count}_contamination_samples",
+        )
+
+    def _has_pending_contamination_samples(self, track: TrackState) -> bool:
+        return (
+            track.state == "stable"
+            and track.decision is None
+            and self._is_metal_label(track.label)
+            and bool(track.contamination_samples)
+        )
 
     def _finalize_track(self, track: TrackState) -> FinalizedInspection:
         snapshot = track.best_in_zone_snapshot or track.best_snapshot or track.latest_snapshot
@@ -228,7 +289,11 @@ class EdgeRuntime:
             frame_height=snapshot.frame_height,
             zone=self.config.evaluation_zone,
         )
-        return track.update_evaluation_zone(frame=frame, in_zone=in_zone)
+        return track.update_evaluation_zone(
+            frame=frame,
+            in_zone=in_zone,
+            store_frame_image=self.config.debug.save_images and self.config.debug.save_annotated_frame,
+        )
 
     def _flush_pending_events(self, *, force: bool = False) -> None:
         now = self.monotonic()
@@ -266,6 +331,14 @@ class EdgeRuntime:
         if not result.accepted:
             LOGGER.warning("heartbeat send failed device_id=%s detail=%s", self.config.device_id, result.detail)
 
+    def _evaluate_contamination_crop(self, crop) -> ContaminationResult:
+        evaluate_crop = getattr(self.contamination_evaluator, "evaluate_crop", None)
+        if evaluate_crop is not None:
+            return evaluate_crop(crop)
+
+        height, width = crop.shape[:2]
+        return self.contamination_evaluator.evaluate(crop, BBox(0, 0, width, height))
+
     def _save_debug_images(self, inspection: FinalizedInspection, track: TrackState) -> None:
         if not self.config.debug.save_images:
             return
@@ -280,12 +353,14 @@ class EdgeRuntime:
         file_stem = self._build_debug_file_stem(inspection)
 
         try:
-            crop = extract_evaluation_crop(snapshot.image, snapshot.bbox)
-            if crop is not None:
-                self._write_debug_image(output_dir / f"{file_stem}__crop.png", crop)
+            self._write_debug_image(output_dir / f"{file_stem}__crop.png", snapshot.image)
 
             if self.config.debug.save_annotated_frame:
-                annotated = self._build_debug_frame(snapshot.image, snapshot.bbox, inspection)
+                annotated = (
+                    self._build_debug_frame(snapshot.frame_image, snapshot.bbox, inspection)
+                    if snapshot.frame_image is not None
+                    else self._build_debug_crop(snapshot.image, inspection)
+                )
                 self._write_debug_image(output_dir / f"{file_stem}__frame.png", annotated)
         except Exception:
             LOGGER.exception("debug image save failed event_id=%s output_dir=%s", inspection.event_id, output_dir)
@@ -337,6 +412,23 @@ class EdgeRuntime:
             cv2.FONT_HERSHEY_SIMPLEX,
             0.55,
             (255, 255, 255),
+            2,
+        )
+        return canvas
+
+    def _build_debug_crop(self, crop, inspection: FinalizedInspection):
+        import cv2
+
+        canvas = crop.copy()
+        height, width = canvas.shape[:2]
+        cv2.rectangle(canvas, (0, 0), (max(0, width - 1), max(0, height - 1)), (0, 255, 255), 2)
+        cv2.putText(
+            canvas,
+            f"{inspection.label} {inspection.decision.decision} {inspection.confidence:.2f}",
+            (8, min(max(20, height - 8), height - 1)),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.55,
+            (0, 255, 255),
             2,
         )
         return canvas

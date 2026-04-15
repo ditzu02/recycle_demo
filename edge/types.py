@@ -138,7 +138,9 @@ class TrackSnapshot:
     confidence: float
     label: str
     class_id: int | None
+    # `image` stores the padded object crop, not the full frame.
     image: np.ndarray | None = None
+    frame_image: np.ndarray | None = None
 
 
 @dataclass
@@ -158,7 +160,10 @@ class TrackState:
     in_evaluation_zone: bool = False
     has_entered_evaluation_zone: bool = False
     in_zone_consecutive_hits: int = 0
+    latest_in_zone_snapshot: TrackSnapshot | None = None
     best_in_zone_snapshot: TrackSnapshot | None = None
+    contamination_samples: list[ContaminationResult] = field(default_factory=list)
+    contamination_sample_frame_indexes: set[int] = field(default_factory=set)
     contamination: ContaminationResult | None = None
     decision: DecisionResult | None = None
     event_id: str | None = None
@@ -196,7 +201,7 @@ class TrackState:
                 confidence=detection.confidence,
                 label=detection.label,
                 class_id=detection.class_id,
-                image=frame.image.copy(),
+                image=extract_snapshot_crop(frame.image, detection.bbox),
             )
 
     def miss(self) -> None:
@@ -206,7 +211,7 @@ class TrackState:
     def was_observed_in_frame(self, frame_index: int) -> bool:
         return self.latest_snapshot is not None and self.latest_snapshot.frame_index == frame_index
 
-    def update_evaluation_zone(self, *, frame: FrameSample, in_zone: bool) -> bool:
+    def update_evaluation_zone(self, *, frame: FrameSample, in_zone: bool, store_frame_image: bool = False) -> bool:
         was_in_zone = self.in_evaluation_zone
         just_left_zone = was_in_zone and not in_zone
         self.in_evaluation_zone = in_zone
@@ -230,13 +235,25 @@ class TrackState:
             confidence=self.latest_snapshot.confidence,
             label=self.latest_snapshot.label,
             class_id=self.latest_snapshot.class_id,
-            image=frame.image.copy(),
+            image=extract_snapshot_crop(frame.image, self.latest_snapshot.bbox),
+            frame_image=frame.image.copy() if store_frame_image else None,
         )
+        self.latest_in_zone_snapshot = snapshot
 
         if self.best_in_zone_snapshot is None or snapshot.confidence >= self.best_in_zone_snapshot.confidence:
             self.best_in_zone_snapshot = snapshot
 
         return just_left_zone
+
+
+def extract_snapshot_crop(image: np.ndarray, bbox: BBox, *, pad_ratio: float = 0.05) -> np.ndarray | None:
+    frame_height, frame_width = image.shape[:2]
+    crop_bbox = bbox.expand(pad_ratio, frame_width, frame_height)
+    x1, y1, x2, y2 = crop_bbox.to_int_tuple()
+    crop = image[y1:y2, x1:x2]
+    if crop.size == 0:
+        return None
+    return crop.copy()
 
 
 @dataclass(frozen=True)

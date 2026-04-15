@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 from torchvision import models, transforms
 
-from edge.types import BBox, ContaminationResult
+from edge.types import BBox, ContaminationResult, extract_snapshot_crop
 
 
 def pick_torch_device() -> torch.device:
@@ -23,13 +23,11 @@ def build_cnn(*, num_classes: int = 2) -> nn.Module:
 
 
 def extract_evaluation_crop(image, bbox: BBox, *, pad_ratio: float = 0.05):
-    frame_height, frame_width = image.shape[:2]
-    crop_bbox = bbox.expand(pad_ratio, frame_width, frame_height)
-    x1, y1, x2, y2 = crop_bbox.to_int_tuple()
-    crop = image[y1:y2, x1:x2]
-    if crop.size == 0:
-        return None
-    return crop
+    return extract_snapshot_crop(image, bbox, pad_ratio=pad_ratio)
+
+
+def convert_bgr_to_rgb(image):
+    return image[..., ::-1].copy()
 
 
 class MetalContaminationEvaluator:
@@ -50,10 +48,13 @@ class MetalContaminationEvaluator:
 
     def evaluate(self, image, bbox: BBox) -> ContaminationResult:
         crop = extract_evaluation_crop(image, bbox)
-        if crop is None:
+        return self.evaluate_crop(crop)
+
+    def evaluate_crop(self, crop) -> ContaminationResult:
+        if crop is None or crop.size == 0:
             return ContaminationResult(applied=False, reason="empty_crop")
 
-        inputs = self.preprocess(crop).unsqueeze(0).to(self.device)
+        inputs = self.preprocess(convert_bgr_to_rgb(crop)).unsqueeze(0).to(self.device)
         with torch.no_grad():
             logits = self.model(inputs)
             probabilities = torch.softmax(logits, dim=1).cpu().numpy()[0]

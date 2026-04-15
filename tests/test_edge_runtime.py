@@ -3,10 +3,12 @@ from __future__ import annotations
 import io
 import json
 import os
+import sys
 import tempfile
 import unittest
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 from urllib import error
 from urllib.parse import urlparse
 from unittest import mock
@@ -18,14 +20,16 @@ from brain.backend.app import BrainApplication
 from brain.database.repository import BrainRepository
 from brain.models.schema import parse_heartbeat_payload, parse_inference_payload
 from edge.config import EdgeConfig, InspectionZoneConfig, ThresholdConfig
+from edge.contamination import convert_bgr_to_rgb
 from edge.decision import DecisionEngine
+from edge.detection import YOLODetector, infer_yolo_model_format
 from edge.filtering import DetectionFilter, is_bbox_center_in_zone
 from edge.payloads import build_event_id, map_event_payload, map_heartbeat_payload
 from edge.runtime import EdgeRuntime
 from edge.stabilization import TrackStabilizer
 from edge.tracking import TrackManager
 from edge.transport import BrainTransport, TransportResult
-from edge.types import BBox, ContaminationResult, DecisionResult, Detection, FinalizedInspection, FrameSample
+from edge.types import BBox, ContaminationResult, DecisionResult, Detection, FinalizedInspection, FrameSample, TrackState
 
 
 class EdgeConfigAndPayloadTests(unittest.TestCase):
@@ -35,11 +39,39 @@ class EdgeConfigAndPayloadTests(unittest.TestCase):
         self.assertEqual(config.event_endpoint_url, "http://127.0.0.1:8000/api/inference")
         self.assertEqual(config.heartbeat_endpoint_url, "http://127.0.0.1:8000/api/heartbeat")
         self.assertEqual(config.allowed_classes, ("Metal",))
+        self.assertEqual(config.models.yolo_confidence_floor, 0.50)
+        self.assertEqual(config.models.yolo_class_names, ())
         self.assertEqual(config.thresholds.min_in_zone_frames_for_evaluation, 2)
+        self.assertEqual(config.thresholds.contamination_sample_count, 3)
         self.assertEqual(config.thresholds.label_accept_confidence, 0.85)
         self.assertEqual(config.evaluation_zone, InspectionZoneConfig(x1=0.20, y1=0.55, x2=0.80, y2=0.95))
         self.assertFalse(config.debug.save_images)
         self.assertEqual(config.debug.output_dir.name, "edge_debug")
+
+    def test_cli_can_override_yolo_confidence_floor(self) -> None:
+        from edge.config import build_config
+
+        with mock.patch.dict(os.environ, {}, clear=True):
+            config = EdgeConfig.from_env()
+            cli_config = build_config(["--yolo-confidence-floor", "0.40"])
+        self.assertEqual(config.models.yolo_confidence_floor, 0.50)
+        self.assertEqual(cli_config.models.yolo_confidence_floor, 0.40)
+
+    def test_cli_can_override_contamination_sample_count(self) -> None:
+        from edge.config import build_config
+
+        with mock.patch.dict(os.environ, {}, clear=True):
+            config = build_config(["--contamination-samples", "2"])
+
+        self.assertEqual(config.thresholds.contamination_sample_count, 2)
+
+    def test_cli_can_configure_yolo_class_names_for_onnx_metadata_fallback(self) -> None:
+        from edge.config import build_config
+
+        with mock.patch.dict(os.environ, {}, clear=True):
+            config = build_config(["--yolo-class-names", "Plastic,Metal,Glass"])
+
+        self.assertEqual(config.models.yolo_class_names, ("Plastic", "Metal", "Glass"))
 
     def test_event_payload_matches_brain_v1_shape(self) -> None:
         inspection = FinalizedInspection(
@@ -127,6 +159,43 @@ class EdgeConfigAndPayloadTests(unittest.TestCase):
 
 
 class FilteringAndDecisionTests(unittest.TestCase):
+    def test_yolo_model_format_is_inferred_from_extension(self) -> None:
+        self.assertEqual(infer_yolo_model_format("best8S.pt"), "pt")
+        self.assertEqual(infer_yolo_model_format("best8S.onnx"), "onnx")
+
+    def test_onnx_yolo_detector_uses_same_detection_shape(self) -> None:
+        fake_ultralytics = SimpleNamespace(YOLO=FakeYOLOWithoutClassNames)
+        with mock.patch.dict(sys.modules, {"ultralytics": fake_ultralytics}):
+            detector = YOLODetector(
+                model_path="best8S.onnx",
+                image_size=640,
+                confidence_floor=0.50,
+                class_names=("Plastic", "Metal"),
+                device="cpu",
+            )
+
+        detections = detector.detect(_make_frame(index=4, width=100, height=100))
+
+        self.assertEqual(detector.model_format, "onnx")
+        self.assertEqual(len(detections), 1)
+        self.assertEqual(detections[0].label, "Metal")
+        self.assertEqual(detections[0].class_id, 1)
+        self.assertEqual(detections[0].confidence, 0.88)
+        self.assertEqual(detections[0].bbox, BBox(10.0, 20.0, 30.0, 40.0))
+
+    def test_detector_rejects_unsupported_model_format(self) -> None:
+        fake_ultralytics = SimpleNamespace(YOLO=FakeYOLOWithoutClassNames)
+        with mock.patch.dict(sys.modules, {"ultralytics": fake_ultralytics}):
+            with self.assertRaises(ValueError):
+                YOLODetector(model_path="best8S.engine", device="cpu")
+
+    def test_bgr_crop_is_converted_to_rgb_for_cnn_preprocessing(self) -> None:
+        bgr = np.array([[[10, 20, 30], [40, 50, 60]]], dtype=np.uint8)
+
+        rgb = convert_bgr_to_rgb(bgr)
+
+        np.testing.assert_array_equal(rgb, np.array([[[30, 20, 10], [60, 50, 40]]], dtype=np.uint8))
+
     def test_filter_enforces_confidence_class_and_size(self) -> None:
         frame = _make_frame(index=0, width=100, height=100)
         detections = [
@@ -249,6 +318,34 @@ class FilteringAndDecisionTests(unittest.TestCase):
 
 
 class TrackingLifecycleTests(unittest.TestCase):
+    def test_best_snapshots_store_object_crops_not_full_frames(self) -> None:
+        frame = _make_frame(index=0, width=100, height=100)
+        detection = Detection(label="Metal", confidence=0.9, class_id=1, bbox=BBox(20, 40, 60, 80))
+        track = TrackState(track_number=1, object_id="track-0001")
+
+        track.observe(frame, detection)
+        track.update_evaluation_zone(frame=frame, in_zone=True)
+
+        self.assertIsNotNone(track.best_snapshot)
+        self.assertIsNotNone(track.best_snapshot.image)
+        self.assertEqual(track.best_snapshot.image.shape[:2], (44, 44))
+        self.assertIsNotNone(track.best_in_zone_snapshot)
+        self.assertIsNotNone(track.best_in_zone_snapshot.image)
+        self.assertEqual(track.best_in_zone_snapshot.image.shape[:2], (44, 44))
+        self.assertIsNone(track.best_in_zone_snapshot.frame_image)
+
+    def test_zone_snapshot_keeps_full_frame_only_when_debug_frame_requested(self) -> None:
+        frame = _make_frame(index=0, width=100, height=100)
+        detection = Detection(label="Metal", confidence=0.9, class_id=1, bbox=BBox(20, 40, 60, 80))
+        track = TrackState(track_number=1, object_id="track-0001")
+
+        track.observe(frame, detection)
+        track.update_evaluation_zone(frame=frame, in_zone=True, store_frame_image=True)
+
+        self.assertIsNotNone(track.best_in_zone_snapshot)
+        self.assertIsNotNone(track.best_in_zone_snapshot.frame_image)
+        self.assertEqual(track.best_in_zone_snapshot.frame_image.shape[:2], (100, 100))
+
     def test_stable_track_exits_after_missing_frames(self) -> None:
         manager = TrackManager(iou_threshold=0.30, max_missed_frames=2)
         stabilizer = TrackStabilizer(stable_after_frames=2, min_in_zone_frames_for_evaluation=2)
@@ -425,6 +522,90 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(evaluator.calls, 0)
         self.assertEqual(len(transport.event_payloads), 0)
 
+    def test_runtime_passes_crop_to_contamination_evaluator(self) -> None:
+        frames = [_make_frame(index=index, width=100, height=100) for index in range(4)]
+        detector = SequenceDetector(
+            {
+                0: [Detection(label="Metal", confidence=0.90, class_id=1, bbox=BBox(20, 20, 60, 60))],
+                1: [Detection(label="Metal", confidence=0.92, class_id=1, bbox=BBox(20, 40, 60, 80))],
+                2: [Detection(label="Metal", confidence=0.93, class_id=1, bbox=BBox(20, 45, 60, 85))],
+            }
+        )
+        evaluator = RecordingContaminationEvaluator()
+        runtime = EdgeRuntime(
+            _build_test_config(),
+            camera=FrameSequenceCamera(frames),
+            detector=detector,
+            contamination_evaluator=evaluator,
+            transport=ScriptedTransport([]),
+        )
+
+        runtime.run(max_frames=len(frames))
+
+        self.assertEqual(evaluator.calls, 1)
+        self.assertEqual(evaluator.crop_shapes, [(44, 44, 3)])
+
+    def test_runtime_averages_metal_contamination_samples_before_decision(self) -> None:
+        frames = [_make_frame(index=index, width=100, height=100) for index in range(7)]
+        detector = SequenceDetector(
+            {
+                0: [Detection(label="Metal", confidence=0.90, class_id=1, bbox=BBox(20, 20, 60, 60))],
+                1: [Detection(label="Metal", confidence=0.92, class_id=1, bbox=BBox(20, 40, 60, 80))],
+                2: [Detection(label="Metal", confidence=0.93, class_id=1, bbox=BBox(20, 45, 60, 85))],
+                3: [Detection(label="Metal", confidence=0.91, class_id=1, bbox=BBox(20, 46, 60, 86))],
+                4: [Detection(label="Metal", confidence=0.90, class_id=1, bbox=BBox(20, 44, 60, 84))],
+                5: [Detection(label="Metal", confidence=0.89, class_id=1, bbox=BBox(20, 24, 60, 64))],
+            }
+        )
+        evaluator = SequenceContaminationEvaluator([0.10, 0.50, 0.90])
+        transport = ScriptedTransport([])
+        runtime = EdgeRuntime(
+            _build_test_config(),
+            camera=FrameSequenceCamera(frames),
+            detector=detector,
+            contamination_evaluator=evaluator,
+            transport=transport,
+        )
+
+        runtime.run(max_frames=len(frames))
+
+        self.assertEqual(evaluator.calls, 3)
+        self.assertEqual(len(transport.event_payloads), 1)
+        event_object = transport.event_payloads[0]["objects"][0]
+        self.assertAlmostEqual(event_object["dirty_probability"], 0.50)
+        self.assertAlmostEqual(event_object["clean_probability"], 0.50)
+        self.assertEqual(event_object["decision"], "Review")
+        self.assertEqual(event_object["contamination_status"], "UNCERTAIN")
+        self.assertEqual(event_object["refinement"]["applied"], True)
+
+    def test_runtime_uses_partial_contamination_average_on_zone_exit(self) -> None:
+        frames = [_make_frame(index=index, width=100, height=100) for index in range(5)]
+        detector = SequenceDetector(
+            {
+                0: [Detection(label="Metal", confidence=0.90, class_id=1, bbox=BBox(20, 20, 60, 60))],
+                1: [Detection(label="Metal", confidence=0.92, class_id=1, bbox=BBox(20, 40, 60, 80))],
+                2: [Detection(label="Metal", confidence=0.93, class_id=1, bbox=BBox(20, 45, 60, 85))],
+                3: [Detection(label="Metal", confidence=0.91, class_id=1, bbox=BBox(20, 25, 60, 65))],
+            }
+        )
+        evaluator = SequenceContaminationEvaluator([0.80])
+        transport = ScriptedTransport([])
+        runtime = EdgeRuntime(
+            _build_test_config(),
+            camera=FrameSequenceCamera(frames),
+            detector=detector,
+            contamination_evaluator=evaluator,
+            transport=transport,
+        )
+
+        runtime.run(max_frames=len(frames))
+
+        self.assertEqual(evaluator.calls, 1)
+        self.assertEqual(len(transport.event_payloads), 1)
+        event_object = transport.event_payloads[0]["objects"][0]
+        self.assertEqual(event_object["decision"], "Reject")
+        self.assertAlmostEqual(event_object["dirty_probability"], 0.80)
+
     def test_runtime_emits_once_after_lingering_in_zone_then_exit(self) -> None:
         frames = [_make_frame(index=index, width=100, height=100) for index in range(7)]
         detector = SequenceDetector(
@@ -559,6 +740,41 @@ class FakeResponse:
         return self._body
 
 
+class FakeTensor:
+    def __init__(self, values) -> None:
+        self.values = np.array(values)
+
+    def cpu(self) -> FakeTensor:
+        return self
+
+    def numpy(self):
+        return self.values
+
+
+class FakeBoxes:
+    def __init__(self) -> None:
+        self.xyxy = FakeTensor([[10.0, 20.0, 30.0, 40.0]])
+        self.conf = FakeTensor([0.88])
+        self.cls = FakeTensor([1])
+
+    def __len__(self) -> int:
+        return 1
+
+
+class FakeYOLOResult:
+    boxes = FakeBoxes()
+
+
+class FakeYOLOWithoutClassNames:
+    def __init__(self, model_path: str) -> None:
+        self.model_path = model_path
+        self.model = SimpleNamespace(names={})
+
+    def predict(self, **kwargs):
+        self.last_predict_kwargs = kwargs
+        return [FakeYOLOResult()]
+
+
 class ScriptedUrlopen:
     def __init__(self, *responses):
         self.responses = list(responses)
@@ -620,6 +836,39 @@ class FixedContaminationEvaluator:
 
 class CountingContaminationEvaluator(FixedContaminationEvaluator):
     pass
+
+
+class RecordingContaminationEvaluator(FixedContaminationEvaluator):
+    def __init__(self) -> None:
+        super().__init__()
+        self.crop_shapes: list[tuple[int, ...]] = []
+
+    def evaluate_crop(self, crop) -> ContaminationResult:
+        self.calls += 1
+        self.crop_shapes.append(tuple(crop.shape))
+        return ContaminationResult(
+            dirty_probability=0.12,
+            clean_probability=0.88,
+            applied=True,
+        )
+
+
+class SequenceContaminationEvaluator(FixedContaminationEvaluator):
+    def __init__(self, dirty_probabilities: list[float]) -> None:
+        super().__init__()
+        self.dirty_probabilities = list(dirty_probabilities)
+
+    def evaluate_crop(self, crop) -> ContaminationResult:
+        del crop
+        self.calls += 1
+        if not self.dirty_probabilities:
+            raise AssertionError("Unexpected extra contamination sample.")
+        dirty_probability = self.dirty_probabilities.pop(0)
+        return ContaminationResult(
+            dirty_probability=dirty_probability,
+            clean_probability=1.0 - dirty_probability,
+            applied=True,
+        )
 
 
 class ScriptedTransport:
@@ -717,6 +966,7 @@ def _build_test_config(*, base_url: str = "http://127.0.0.1:8000") -> EdgeConfig
             stable_after_frames=2,
             max_missed_frames=2,
             min_in_zone_frames_for_evaluation=2,
+            contamination_sample_count=3,
             label_accept_confidence=0.85,
             dirty_review_threshold=0.40,
             dirty_reject_threshold=0.70,

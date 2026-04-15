@@ -8,6 +8,7 @@ from urllib.parse import urljoin
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_YOLO_CONFIDENCE_FLOOR = 0.50
 
 
 @dataclass
@@ -23,6 +24,8 @@ class ModelConfig:
     yolo_model_path: Path = REPO_ROOT / "best8S.pt"
     contamination_model_path: Path = REPO_ROOT / "metal_contamination_cnn_best.pt"
     yolo_image_size: int = 640
+    yolo_confidence_floor: float = DEFAULT_YOLO_CONFIDENCE_FLOOR
+    yolo_class_names: tuple[str, ...] = ()
 
 
 @dataclass
@@ -32,6 +35,7 @@ class ThresholdConfig:
     stable_after_frames: int = 3
     max_missed_frames: int = 5
     min_in_zone_frames_for_evaluation: int = 2
+    contamination_sample_count: int = 3
     label_accept_confidence: float = 0.85
     dirty_review_threshold: float = 0.40
     dirty_reject_threshold: float = 0.70
@@ -121,6 +125,8 @@ class EdgeConfig:
                     os.getenv("EDGE_CONTAMINATION_MODEL_PATH", str(REPO_ROOT / "metal_contamination_cnn_best.pt"))
                 ),
                 yolo_image_size=_env_int("EDGE_YOLO_IMGSZ", 640),
+                yolo_confidence_floor=_env_float("EDGE_YOLO_CONFIDENCE_FLOOR", DEFAULT_YOLO_CONFIDENCE_FLOOR),
+                yolo_class_names=_env_csv("EDGE_YOLO_CLASS_NAMES", ()),
             ),
             thresholds=ThresholdConfig(
                 confidence=_env_float("EDGE_CONFIDENCE_THRESHOLD", 0.70),
@@ -128,6 +134,7 @@ class EdgeConfig:
                 stable_after_frames=_env_int("EDGE_STABLE_AFTER_FRAMES", 3),
                 max_missed_frames=_env_int("EDGE_MAX_MISSED_FRAMES", 5),
                 min_in_zone_frames_for_evaluation=_env_int("EDGE_MIN_IN_ZONE_FRAMES_FOR_EVALUATION", 2),
+                contamination_sample_count=_env_int("EDGE_CONTAMINATION_SAMPLE_COUNT", 3),
                 label_accept_confidence=_env_float("EDGE_LABEL_ACCEPT_CONFIDENCE", 0.85),
                 dirty_review_threshold=_env_float("EDGE_DIRTY_REVIEW_THRESHOLD", 0.40),
                 dirty_reject_threshold=_env_float("EDGE_DIRTY_REJECT_THRESHOLD", 0.70),
@@ -150,6 +157,10 @@ class EdgeConfig:
             raise ValueError("max_missed_frames must be at least 1.")
         if self.thresholds.min_in_zone_frames_for_evaluation < 1:
             raise ValueError("min_in_zone_frames_for_evaluation must be at least 1.")
+        if self.thresholds.contamination_sample_count < 1:
+            raise ValueError("contamination_sample_count must be at least 1.")
+        if not 0.0 <= self.models.yolo_confidence_floor <= 1.0:
+            raise ValueError("yolo_confidence_floor must be within [0, 1].")
         if not 0.0 <= self.thresholds.label_accept_confidence <= 1.0:
             raise ValueError("label_accept_confidence must be within [0, 1].")
         if self.thresholds.dirty_review_threshold > self.thresholds.dirty_reject_threshold:
@@ -183,11 +194,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--stable-frames", type=int)
     parser.add_argument("--missed-frames", type=int)
     parser.add_argument("--min-in-zone-frames", type=int)
+    parser.add_argument("--contamination-samples", type=int)
     parser.add_argument("--label-accept-confidence", type=float)
     parser.add_argument("--min-size-ratio", type=float)
     parser.add_argument("--allowed-classes")
     parser.add_argument("--evaluation-zone", help="Normalized x1,y1,x2,y2 rectangle used as the evaluation gate.")
     parser.add_argument("--inspection-zone", help=argparse.SUPPRESS)
+    parser.add_argument("--yolo-confidence-floor", type=float)
+    parser.add_argument("--yolo-class-names")
     parser.add_argument("--yolo-model-path")
     parser.add_argument("--contamination-model-path")
     parser.add_argument("--source-type")
@@ -236,6 +250,8 @@ def build_config(argv: list[str] | None = None) -> EdgeConfig:
         config.thresholds.max_missed_frames = args.missed_frames
     if args.min_in_zone_frames is not None:
         config.thresholds.min_in_zone_frames_for_evaluation = args.min_in_zone_frames
+    if args.contamination_samples is not None:
+        config.thresholds.contamination_sample_count = args.contamination_samples
     if args.label_accept_confidence is not None:
         config.thresholds.label_accept_confidence = args.label_accept_confidence
     if args.min_size_ratio is not None:
@@ -246,6 +262,10 @@ def build_config(argv: list[str] | None = None) -> EdgeConfig:
         config.evaluation_zone = _parse_zone(args.inspection_zone)
     if args.evaluation_zone:
         config.evaluation_zone = _parse_zone(args.evaluation_zone)
+    if args.yolo_confidence_floor is not None:
+        config.models.yolo_confidence_floor = args.yolo_confidence_floor
+    if args.yolo_class_names:
+        config.models.yolo_class_names = _parse_csv(args.yolo_class_names)
     if args.yolo_model_path:
         config.models.yolo_model_path = Path(args.yolo_model_path)
     if args.contamination_model_path:

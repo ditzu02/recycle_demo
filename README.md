@@ -71,6 +71,18 @@ Point the runtime at a different brain host:
 ./.venv/bin/python -m edge --device-id edge_demo_01 --brain-base-url http://127.0.0.1:8000
 ```
 
+Export the current YOLO weights to ONNX for Raspberry Pi performance testing:
+
+```bash
+./.venv/bin/python -c "from ultralytics import YOLO; YOLO('best8S.pt').export(format='onnx', imgsz=640, opset=12, simplify=True)"
+```
+
+Run with the exported ONNX detector:
+
+```bash
+./.venv/bin/python -m edge --device-id edge_demo_01 --yolo-model-path best8S.onnx
+```
+
 Useful runtime knobs:
 
 - `EDGE_DEVICE_ID`
@@ -80,10 +92,14 @@ Useful runtime knobs:
 - `EDGE_CAMERA_INDEX`
 - `EDGE_CAMERA_WIDTH`
 - `EDGE_CAMERA_HEIGHT`
+- `EDGE_YOLO_MODEL_PATH`
+- `EDGE_YOLO_CONFIDENCE_FLOOR`
+- `EDGE_YOLO_CLASS_NAMES`
 - `EDGE_CONFIDENCE_THRESHOLD`
 - `EDGE_STABLE_AFTER_FRAMES`
 - `EDGE_MAX_MISSED_FRAMES`
 - `EDGE_MIN_IN_ZONE_FRAMES_FOR_EVALUATION`
+- `EDGE_CONTAMINATION_SAMPLE_COUNT`
 - `EDGE_LABEL_ACCEPT_CONFIDENCE`
 - `EDGE_ALLOWED_CLASSES`
 - `EDGE_EVALUATION_ZONE`
@@ -95,7 +111,10 @@ Useful runtime knobs:
 
 - The current demo runtime tracks the whole frame, but only evaluates objects after they become stable and dwell inside the evaluation zone.
 - The runtime still defaults to `Metal` for backward compatibility, but `EDGE_ALLOWED_CLASSES` can now be widened to supported non-metal labels such as `Plastic` or `Glass`.
+- YOLO model loading supports `.pt` and exported `.onnx` files through `EDGE_YOLO_MODEL_PATH` / `--yolo-model-path`.
+- Exported ONNX models usually carry class names, but `EDGE_YOLO_CLASS_NAMES` can provide a comma-separated fallback if metadata is missing.
 - The contamination CNN is only used for tracks whose final label is `Metal`.
+- Metal contamination decisions average up to `3` eligible in-zone CNN samples by default.
 - Supported non-metal classes are decided from stability plus label confidence only; they do not claim CNN-based contamination refinement.
 - The default high-confidence accept threshold for label-driven decisions is `0.85`.
 - The default evaluation zone is a normalized lower-frame rectangle: `0.20,0.55,0.80,0.95`.
