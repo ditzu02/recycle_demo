@@ -1,50 +1,108 @@
 {% extends "base.html" %}
 {% block content %}
-<section class="panel system-panel">
+<section class="panel system-overview-panel">
   <div class="panel-head">
     <div>
-      <p class="subsection-label">Control surface</p>
-      <h2>Brain-v1 API explorer</h2>
+      <p class="subsection-label">System overview</p>
+      <h2>Distributed edge-AI coordination</h2>
     </div>
-    <span class="badge status">Service online</span>
+    <span class="badge status">Local demo service</span>
   </div>
-  <div class="system-summary-grid compact">
-    <article class="summary-tile">
-      <p class="metric-label">Service status</p>
-      <strong class="summary-tile-value">{{ system_summary.status }}</strong>
-    </article>
-    <article class="summary-tile">
-      <p class="metric-label">Active devices</p>
-      <strong class="summary-tile-value">{{ system_summary.active_devices }}</strong>
-    </article>
-    <article class="summary-tile">
-      <p class="metric-label">Stored events</p>
-      <strong class="summary-tile-value">{{ system_summary.total_events }}</strong>
-    </article>
-    <article class="summary-tile">
-      <p class="metric-label">Detected objects</p>
-      <strong class="summary-tile-value">{{ system_summary.total_objects }}</strong>
-    </article>
-  </div>
-  <p class="api-note">Overview and Events pages auto-refresh every {{ dashboard_refresh_seconds }} seconds during live demos.</p>
-</section>
 
-<section class="api-stack">
-  {% for endpoint in endpoints %}
-  <article class="panel api-card">
-    <div class="panel-head api-card-head">
-      <div class="endpoint-heading">
-        <span class="badge method {{ endpoint.method|lower() }}">{{ endpoint.method }}</span>
-        <strong class="endpoint-path">{{ endpoint.path }}</strong>
+  <div class="system-summary-grid compact">
+    {% for card in summary_cards %}
+    <article class="summary-tile">
+      <p class="metric-label">{{ card.label }}</p>
+      <strong class="summary-tile-value">{{ card.value }}</strong>
+      <span class="summary-tile-detail">{{ card.detail }}</span>
+    </article>
+    {% endfor %}
+  </div>
+
+  <div class="system-flow" aria-label="System data flow">
+    {% for step in system_flow %}
+    <div class="system-flow-step">
+      <span class="flow-index">{{ loop.index }}</span>
+      <div>
+        <strong>{{ step.title }}</strong>
+        <p>{{ step.description }}</p>
       </div>
     </div>
-    <p class="api-copy">{{ endpoint.description }}</p>
-    <p class="api-note">{{ endpoint.notes }}</p>
+    {% endfor %}
+  </div>
+</section>
+
+<section class="system-detail-grid">
+  <article class="panel system-payload-card">
+    <div class="panel-head">
+      <div>
+        <p class="subsection-label">Edge to brain payload</p>
+        <h2>Structured inference result</h2>
+      </div>
+      <span class="chip source">Brain-v1 JSON</span>
+    </div>
+    <p class="api-copy">Each edge node performs local inference, finalizes one tracked-object result, and sends only the structured result to the brain.</p>
+    <div class="system-note-list">
+      {% for point in payload_points %}
+      <div class="system-note-row">
+        <span class="status-dot" aria-hidden="true"></span>
+        <span>{{ point }}</span>
+      </div>
+      {% endfor %}
+    </div>
     <div class="code-surface">
+      <div class="code-surface-head">
+        <span class="subsection-label">Representative request</span>
+      </div>
+      <pre class="code-block compact"><code>{{ payload_example }}</code></pre>
+    </div>
+  </article>
+
+  <article class="panel system-notes-card">
+    <div class="panel-head">
+      <div>
+        <p class="subsection-label">Coordination notes</p>
+        <h2>What the brain contributes</h2>
+      </div>
+    </div>
+    <div class="system-note-list">
+      {% for note in system_notes %}
+      <div class="system-note-row">
+        <span class="status-dot" aria-hidden="true"></span>
+        <span>{{ note }}</span>
+      </div>
+      {% endfor %}
+    </div>
+    <div class="interface-timing">
+      <span class="chip count">Live stream {{ live_stream_refresh_seconds }}s polling</span>
+      <span class="chip count">Events {{ dashboard_refresh_seconds }}s refresh</span>
+      <span class="chip source">Local SQLite persistence</span>
+    </div>
+  </article>
+</section>
+
+<section class="system-section-head">
+  <div>
+    <p class="subsection-label">Brain endpoints</p>
+    <h2>System interface</h2>
+  </div>
+  <p>The routes below are the small local interface used by edge devices and dashboard views. Samples are intentionally compact so the page stays presentation-friendly.</p>
+</section>
+
+<section class="endpoint-grid">
+  {% for endpoint in endpoints %}
+  <article class="panel endpoint-card">
+    <div class="endpoint-card-head">
+      <span class="badge method {{ endpoint.method|lower() }}">{{ endpoint.method }}</span>
+      <strong class="endpoint-path">{{ endpoint.path }}</strong>
+    </div>
+    <span class="chip source">{{ endpoint.role }}</span>
+    <p class="api-copy">{{ endpoint.description }}</p>
+    <div class="code-surface endpoint-sample">
       <div class="code-surface-head">
         <span class="subsection-label">{{ endpoint.sample_label }}</span>
       </div>
-      <pre class="code-block"><code>{{ endpoint.sample_body }}</code></pre>
+      <pre class="code-block endpoint"><code>{{ endpoint.sample_body }}</code></pre>
     </div>
   </article>
   {% endfor %}

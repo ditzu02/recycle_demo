@@ -3,52 +3,13 @@
 <section class="panel">
   <div class="panel-head">
     <div>
-      <p class="subsection-label">Event feed</p>
-      <h2>Latest inference events</h2>
+      <p class="subsection-label">Object results</p>
+      <h2>Latest detected objects</h2>
     </div>
-    <span class="chip count">Page {{ page }} · {{ events|length }} events</span>
-  </div>
-  <div class="table-wrap">
-    <table class="monitor-table">
-      <thead>
-        <tr>
-          <th class="col-time">Received</th>
-          <th class="col-time">Device Time</th>
-          <th class="col-device">Device</th>
-          <th class="col-number">Objects</th>
-          <th class="col-code">Frame</th>
-          <th class="col-source">Source</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for event in events %}
-        <tr>
-          <td class="cell-time"><time datetime="{{ event.received_at }}" title="{{ event.received_at }}">{{ event.received_at|datetime_human }}</time></td>
-          <td class="cell-time"><time datetime="{{ event.timestamp }}" title="{{ event.timestamp }}">{{ event.timestamp|datetime_human }}</time></td>
-          <td class="cell-device"><span class="chip device">{{ event.device_id }}</span></td>
-          <td class="cell-number"><span class="chip count">{{ event.object_count }}</span></td>
-          <td class="cell-code"><span class="table-code">{{ event.frame_width or "-" }} x {{ event.frame_height or "-" }}</span></td>
-          <td class="cell-source">
-            <span class="chip source" title="{{ event.source_type }}">{{ event.source_type|replace('_', ' ')|title }}</span>
-          </td>
-        </tr>
-        {% else %}
-        <tr>
-          <td colspan="6" class="empty-cell">No events stored yet.</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-</section>
-
-<section class="panel">
-  <div class="panel-head">
-    <div>
-      <p class="subsection-label">Object window</p>
-      <h2>Latest object-level results</h2>
+    <div class="summary-meta">
+      <span class="chip count">Page {{ page }} · {{ objects|length }} objects</span>
+      <span class="chip source">One object result per finalized edge payload</span>
     </div>
-    <p>Objects linked to the same event page shown above.</p>
   </div>
   <div class="table-wrap">
     <table class="monitor-table">
@@ -99,7 +60,7 @@
   </div>
 </section>
 
-<nav class="pager" aria-label="Events pagination">
+<nav class="pager" aria-label="Object results pagination">
   <div class="pager-meta">
     <span class="chip count">Limit {{ limit }}</span>
     <span class="chip source">Ordered by brain receive time</span>

@@ -1,0 +1,99 @@
+{% for device in devices %}
+<details class="device-detail" data-device-id="{{ device.device_id }}">
+  <summary>
+    <div class="device-summary-left">
+      <span class="status-dot {{ device.device_state }}" aria-hidden="true"></span>
+      <span class="chip device">{{ device.device_id }}</span>
+      <span class="badge {{ device.device_state }}">{{ device.device_state|title }}</span>
+      <span class="chip count">{{ device.object_count }} objects</span>
+      <span class="chip source">{{ device.last_contact_kind|replace('_', ' ')|title }}</span>
+    </div>
+    <div class="device-summary-right">
+      <span class="badge {{ device.heartbeat_freshness }}">{{ device.heartbeat_freshness|title }} heartbeat</span>
+      {% if device.last_heartbeat_status %}
+      <span class="chip source">{{ device.last_heartbeat_status|title }}</span>
+      {% endif %}
+      <span class="badge accept">Accept {{ device.accept_count }}</span>
+      <span class="badge review">Review {{ device.review_count }}</span>
+      <span class="badge reject">Reject {{ device.reject_count }}</span>
+      <div class="time-stack">
+        <span class="subsection-label">Last contact</span>
+        <time datetime="{{ device.last_seen }}" title="{{ device.last_seen }}">{{ device.last_seen|datetime_human }}</time>
+      </div>
+    </div>
+  </summary>
+  <div class="device-detail-body">
+    <div class="meta-list">
+      <div class="meta-row">
+        <span>Derived state</span>
+        <span class="badge {{ device.device_state }}">{{ device.device_state|title }}</span>
+      </div>
+      <div class="meta-row">
+        <span>Brain last contact</span>
+        <time datetime="{{ device.last_seen }}" title="{{ device.last_seen }}">{{ device.last_seen|datetime_human }}</time>
+      </div>
+      <div class="meta-row">
+        <span>Device timestamp</span>
+        {% if device.last_contact_device_timestamp %}
+        <time datetime="{{ device.last_contact_device_timestamp }}" title="{{ device.last_contact_device_timestamp }}">{{ device.last_contact_device_timestamp|datetime_human }}</time>
+        {% else %}
+        <span>-</span>
+        {% endif %}
+      </div>
+      <div class="meta-row">
+        <span>Last heartbeat</span>
+        <div class="meta-inline">
+          <span class="badge {{ device.heartbeat_freshness }}">{{ device.heartbeat_freshness|title }}</span>
+          {% if device.last_heartbeat_status %}
+          <span class="chip source">{{ device.last_heartbeat_status|title }}</span>
+          {% endif %}
+          {% if device.last_heartbeat_received_at %}
+          <time datetime="{{ device.last_heartbeat_received_at }}" title="{{ device.last_heartbeat_received_at }}">{{ device.last_heartbeat_received_at|datetime_human }}</time>
+          {% else %}
+          <span>-</span>
+          {% endif %}
+        </div>
+      </div>
+      <div class="meta-row">
+        <span>Last object result</span>
+        <div class="meta-inline">
+          {% if device.last_event_id %}
+          <span class="table-code">{{ device.last_event_id }}</span>
+          {% endif %}
+          {% if device.last_event_received_at %}
+          <time datetime="{{ device.last_event_received_at }}" title="{{ device.last_event_received_at }}">{{ device.last_event_received_at|datetime_human }}</time>
+          {% else %}
+          <span>-</span>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+    <div class="decision-strip compact">
+      <div class="decision accept">
+        <span>Accept</span>
+        <strong>{{ device.accept_count }}</strong>
+      </div>
+      <div class="decision review">
+        <span>Review</span>
+        <strong>{{ device.review_count }}</strong>
+      </div>
+      <div class="decision reject">
+        <span>Reject</span>
+        <strong>{{ device.reject_count }}</strong>
+      </div>
+    </div>
+    <div class="device-class-list">
+      {% for row in device.class_counts %}
+      <div class="device-class-row">
+        <span class="device-class-label">{{ row.label }}</span>
+        <span class="chip count">{{ row.count }}</span>
+      </div>
+      {% else %}
+      <p class="empty-state">No objects stored for this device.</p>
+      {% endfor %}
+    </div>
+  </div>
+</details>
+{% else %}
+<p class="empty-state">No device activity yet.</p>
+{% endfor %}

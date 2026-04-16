@@ -206,7 +206,7 @@ This posts seeded Brain-v1 finalized inspection events to:
 
 - `POST http://127.0.0.1:8000/api/inference`
 
-### API
+### Brain Interface
 
 Health check:
 
@@ -296,11 +296,14 @@ Canonical Brain-v1 heartbeat:
 - `BRAIN_HOST`: bind address for the WSGI server. Default: `127.0.0.1`
 - `BRAIN_PORT`: bind port for the WSGI server. Default: `8000`
 - `BRAIN_SEED_MOCK`: startup mock seeding toggle. Default when unset: enabled. Truthy values: `1`, `true`, `yes`, `on`. Falsy values: `0`, `false`, `no`, `off`.
+- `BRAIN_HEARTBEAT_FRESH_SECONDS`: heartbeat age treated as fresh. Default: `30`.
+- `BRAIN_HEARTBEAT_OFFLINE_SECONDS`: heartbeat age treated as offline. Default: `90`.
 
 ### Demo Notes
 
-- The Overview and Events pages auto-refresh every 5 seconds during a live demo.
+- The Overview live inference stream polls compact JSON every 3 seconds; the Events page keeps a 5-second refresh during live demos.
+- Device state is derived from heartbeat receive time: unknown before first heartbeat, online while fresh, stale after the fresh threshold, and offline after the offline threshold or an explicit offline heartbeat.
 - Device last-seen ordering is based on when the brain received the event or heartbeat.
-- Event and object tables show both the device-reported timestamp and the brain receive time for provenance.
+- Object result tables show both the device-reported timestamp and the brain receive time for provenance.
 - Standalone mock demo mode uses the default seeding behavior or `BRAIN_SEED_MOCK=1`.
 - Real-edge mode should use `BRAIN_SEED_MOCK=0` and avoid running `python -m brain.mock.simulator`.

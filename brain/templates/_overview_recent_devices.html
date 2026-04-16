@@ -1,0 +1,21 @@
+{% for device in recent_devices %}
+<div class="device-row" data-device-id="{{ device.device_id }}">
+  <div class="device-row-main">
+    <span class="status-dot {{ device.device_state }}" aria-hidden="true"></span>
+    <span class="chip device">{{ device.device_id }}</span>
+    <span class="badge {{ device.device_state }}">{{ device.device_state|title }}</span>
+    <span class="chip source">{{ device.last_contact_kind|replace('_', ' ')|title }}</span>
+    <span class="chip count">{{ device.object_count }} objects</span>
+    <span class="badge {{ device.heartbeat_freshness }}">{{ device.heartbeat_freshness|title }} heartbeat</span>
+    {% if device.last_heartbeat_status %}
+    <span class="chip source">{{ device.last_heartbeat_status|title }}</span>
+    {% endif %}
+  </div>
+  <div class="time-stack">
+    <span class="subsection-label">Last contact</span>
+    <time datetime="{{ device.last_seen }}" title="{{ device.last_seen }}">{{ device.last_seen|datetime_human }}</time>
+  </div>
+</div>
+{% else %}
+<p class="empty-state">No device activity yet.</p>
+{% endfor %}

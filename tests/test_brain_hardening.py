@@ -5,6 +5,7 @@ import json
 import sqlite3
 import tempfile
 import unittest
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest import mock
 from wsgiref.util import setup_testing_defaults
@@ -196,7 +197,53 @@ class BrainHardeningTests(unittest.TestCase):
         self.assertEqual(overview["devices"][0]["device_id"], "pi_live")
         self.assertEqual(overview["devices"][0]["last_contact_kind"], "heartbeat")
         self.assertEqual(overview["devices"][0]["heartbeat_freshness"], "fresh")
+        self.assertEqual(overview["devices"][0]["device_state"], "online")
         self.assertEqual(overview["devices"][0]["event_count"], 0)
+
+    def test_device_state_is_derived_from_heartbeat_age_and_status(self) -> None:
+        self._request_json("POST", "/api/inference", build_event_payload(device_id="pi_state"))
+
+        status_code, overview = self._request_json("GET", "/api/overview")
+        self.assertEqual(status_code, 200)
+        self.assertEqual(overview["heartbeat_thresholds"]["fresh_seconds"], 30)
+        self.assertEqual(overview["heartbeat_thresholds"]["offline_seconds"], 90)
+        self.assertEqual(overview["devices"][0]["heartbeat_freshness"], "never")
+        self.assertEqual(overview["devices"][0]["device_state"], "unknown")
+
+        self._request_json("POST", "/api/heartbeat", build_heartbeat_payload(device_id="pi_state", status="online"))
+        status_code, overview = self._request_json("GET", "/api/overview")
+        self.assertEqual(status_code, 200)
+        self.assertEqual(overview["devices"][0]["heartbeat_freshness"], "fresh")
+        self.assertEqual(overview["devices"][0]["device_state"], "online")
+
+        self._set_heartbeat_state(
+            device_id="pi_state",
+            received_at=(datetime.now(UTC) - timedelta(seconds=45)).isoformat(),
+            status="online",
+        )
+        status_code, overview = self._request_json("GET", "/api/overview")
+        self.assertEqual(status_code, 200)
+        self.assertEqual(overview["devices"][0]["heartbeat_freshness"], "stale")
+        self.assertEqual(overview["devices"][0]["device_state"], "stale")
+
+        self._set_heartbeat_state(
+            device_id="pi_state",
+            received_at=(datetime.now(UTC) - timedelta(seconds=120)).isoformat(),
+            status="online",
+        )
+        status_code, overview = self._request_json("GET", "/api/overview")
+        self.assertEqual(status_code, 200)
+        self.assertEqual(overview["devices"][0]["device_state"], "offline")
+
+        self._set_heartbeat_state(
+            device_id="pi_state",
+            received_at=datetime.now(UTC).isoformat(),
+            status="offline",
+        )
+        status_code, overview = self._request_json("GET", "/api/overview")
+        self.assertEqual(status_code, 200)
+        self.assertEqual(overview["devices"][0]["heartbeat_freshness"], "fresh")
+        self.assertEqual(overview["devices"][0]["device_state"], "offline")
 
     def test_events_are_ordered_by_receive_time(self) -> None:
         first = build_event_payload(event_id="evt-recent-ts", timestamp="2026-03-28T10:30:00Z")
@@ -209,6 +256,47 @@ class BrainHardeningTests(unittest.TestCase):
         self.assertEqual(status_code, 200)
         self.assertEqual(payload["events"][0]["event_uuid"], "evt-old-ts")
         self.assertEqual(payload["events"][1]["event_uuid"], "evt-recent-ts")
+
+    def test_live_overview_endpoint_returns_compact_recent_stream(self) -> None:
+        first = build_event_payload(event_id="evt-live-001", device_id="pi_01")
+        second = build_event_payload(event_id="evt-live-002", device_id="pi_02")
+
+        self._request_json("POST", "/api/inference", first)
+        self._request_json("POST", "/api/inference", second)
+
+        status_code, payload = self._request_json("GET", "/api/overview/live?limit=1")
+        self.assertEqual(status_code, 200)
+        self.assertEqual(payload["limit"], 1)
+        self.assertEqual(payload["summary"]["total_events"], 2)
+        self.assertEqual(payload["summary"]["total_objects"], 2)
+        self.assertEqual(payload["summary"]["active_devices"], 2)
+        self.assertEqual(payload["summary"]["accept_count"], 2)
+        self.assertIn("devices_html", payload)
+        self.assertIn("recent_devices_html", payload)
+        self.assertIn("data-device-id=\"pi_02\"", payload["devices_html"])
+        self.assertIn("Unknown", payload["devices_html"])
+        self.assertEqual(len(payload["items"]), 1)
+
+        item = payload["items"][0]
+        self.assertEqual(item["event_uuid"], "evt-live-002")
+        self.assertEqual(item["device_id"], "pi_02")
+        self.assertEqual(item["label"], "Metal")
+        self.assertEqual(item["decision"], "Accept")
+        self.assertEqual(item["confidence"], 0.91)
+        self.assertEqual(
+            set(item),
+            {
+                "id",
+                "event_uuid",
+                "object_id",
+                "device_id",
+                "label",
+                "decision",
+                "confidence",
+                "timestamp",
+                "received_at",
+            },
+        )
 
     def test_validation_failure_returns_400(self) -> None:
         invalid_payload = {
@@ -232,13 +320,41 @@ class BrainHardeningTests(unittest.TestCase):
 
         status_code, overview_html = self._request_html("GET", "/")
         self.assertEqual(status_code, 200)
+        self.assertIn("Detected objects", overview_html)
+        self.assertNotIn("Total events", overview_html)
         self.assertIn("Last contact", overview_html)
         self.assertIn("heartbeat", overview_html.lower())
 
-        status_code, events_html = self._request_html("GET", "/events")
+        status_code, objects_html = self._request_html("GET", "/events")
         self.assertEqual(status_code, 200)
-        self.assertIn("Received", events_html)
-        self.assertIn("Device Time", events_html)
+        self.assertIn("Latest detected objects", objects_html)
+        self.assertIn("Received", objects_html)
+        self.assertIn("Device Time", objects_html)
+        self.assertNotIn("Latest inference events", objects_html)
+
+        status_code, system_html = self._request_html("GET", "/api")
+        self.assertEqual(status_code, 200)
+        self.assertIn("System interface", system_html)
+        self.assertIn("Edge to brain payload", system_html)
+        self.assertIn("/api/inference", system_html)
+        self.assertNotIn("Brain-v1 API explorer", system_html)
+
+    def _set_heartbeat_state(self, device_id: str, received_at: str, status: str) -> None:
+        connection = sqlite3.connect(self.repository.db_path)
+        try:
+            connection.execute(
+                """
+                UPDATE device_status
+                SET
+                    last_heartbeat_received_at = ?,
+                    last_heartbeat_status = ?
+                WHERE device_id = ?
+                """,
+                (received_at, status, device_id),
+            )
+            connection.commit()
+        finally:
+            connection.close()
 
     def _request_json(self, method: str, path: str, payload: dict | None = None) -> tuple[int, dict]:
         environ: dict[str, object] = {}

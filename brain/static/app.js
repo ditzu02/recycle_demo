@@ -7,8 +7,10 @@
   const parser = new DOMParser();
   const cache = new Map();
   const cacheTtlMs = 5000;
-  const autoRefreshMs = 5000;
-  const livePages = new Set(["overview", "events"]);
+  const pageRefreshMs = 5000;
+  const overviewLiveRefreshMs = 3000;
+  const overviewPageKey = "overview";
+  const fullRefreshPages = new Set(["events"]);
   let refreshTimerId = 0;
   let refreshInFlight = false;
 
@@ -127,6 +129,240 @@
     return remember(urlKey, nextState);
   }
 
+  function getOverviewLivePanel() {
+    return pageContent.querySelector("[data-live-stream-panel]");
+  }
+
+  function getOverviewLiveLimit() {
+    const panel = getOverviewLivePanel();
+    const parsed = Number.parseInt(panel ? panel.dataset.liveLimit || "" : "", 10);
+    return Number.isFinite(parsed) ? parsed : 10;
+  }
+
+  function formatNumber(value) {
+    const number = Number(value);
+    return Number.isFinite(number) ? number.toLocaleString("en-US") : String(value == null ? 0 : value);
+  }
+
+  function updateOverviewSummary(summary) {
+    if (!summary) {
+      return;
+    }
+    for (const node of pageContent.querySelectorAll("[data-live-summary]")) {
+      const key = node.dataset.liveSummary || "";
+      if (Object.prototype.hasOwnProperty.call(summary, key)) {
+        node.textContent = formatNumber(summary[key]);
+      }
+    }
+  }
+
+  function decisionClass(value) {
+    const normalized = String(value || "unknown").toLowerCase();
+    if (normalized === "accept" || normalized === "review" || normalized === "reject") {
+      return normalized;
+    }
+    return "unknown";
+  }
+
+  function confidenceTone(value) {
+    const number = Number(value);
+    if (!Number.isFinite(number)) {
+      return "low";
+    }
+    if (number >= 0.85) {
+      return "high";
+    }
+    if (number >= 0.6) {
+      return "mid";
+    }
+    return "low";
+  }
+
+  function getStreamId(item) {
+    if (item && item.id) {
+      return String(item.id);
+    }
+    return `${item.event_uuid || "event"}:${item.object_id || item.label || "object"}:${item.received_at || ""}`;
+  }
+
+  function formatConfidence(value) {
+    const number = Number(value);
+    return Number.isFinite(number) ? number.toFixed(2) : "-";
+  }
+
+  function formatRelativeTime(value) {
+    if (!value) {
+      return "-";
+    }
+    const parsed = Date.parse(value);
+    if (!Number.isFinite(parsed)) {
+      return String(value);
+    }
+
+    const diffSeconds = Math.floor((Date.now() - parsed) / 1000);
+    if (diffSeconds < 5) {
+      return "just now";
+    }
+    if (diffSeconds < 60) {
+      return `${diffSeconds}s ago`;
+    }
+    if (diffSeconds < 3600) {
+      return `${Math.floor(diffSeconds / 60)}m ago`;
+    }
+    if (diffSeconds < 86400) {
+      return `${Math.floor(diffSeconds / 3600)}h ago`;
+    }
+    return new Intl.DateTimeFormat(undefined, {
+      day: "2-digit",
+      month: "short",
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(new Date(parsed));
+  }
+
+  function updateLiveTimes(root) {
+    for (const node of root.querySelectorAll("[data-live-time]")) {
+      node.textContent = formatRelativeTime(node.getAttribute("datetime") || node.dataset.liveTime || "");
+    }
+  }
+
+  function createChip(className, text) {
+    const node = document.createElement("span");
+    node.className = className;
+    node.textContent = text;
+    return node;
+  }
+
+  function createLiveStreamRow(item, isNew) {
+    const row = document.createElement("div");
+    row.className = "live-row";
+    if (isNew) {
+      row.classList.add("is-new");
+    }
+    row.dataset.streamId = getStreamId(item);
+
+    const main = document.createElement("div");
+    main.className = "live-row-main";
+    main.appendChild(createChip("chip device", item.device_id || "-"));
+
+    const label = document.createElement("strong");
+    label.textContent = item.label || "Unknown";
+    main.appendChild(label);
+
+    const right = document.createElement("div");
+    right.className = "live-row-right";
+    const decision = item.decision || "Unknown";
+    right.appendChild(createChip(`badge ${decisionClass(decision)}`, decision));
+    right.appendChild(createChip(`chip confidence ${confidenceTone(item.confidence)}`, formatConfidence(item.confidence)));
+
+    const time = document.createElement("time");
+    const rawTime = item.received_at || item.timestamp || "";
+    time.dateTime = rawTime;
+    time.title = rawTime;
+    time.dataset.liveTime = rawTime;
+    time.textContent = formatRelativeTime(rawTime);
+    right.appendChild(time);
+
+    row.appendChild(main);
+    row.appendChild(right);
+    return row;
+  }
+
+  function renderLiveStream(items) {
+    const list = pageContent.querySelector("[data-live-stream-list]");
+    if (!list) {
+      return;
+    }
+
+    const normalizedItems = Array.isArray(items) ? items : [];
+    const existingRows = Array.from(list.querySelectorAll("[data-stream-id]"));
+    const existingIds = existingRows.map((row) => row.dataset.streamId || "");
+    const nextIds = normalizedItems.map(getStreamId);
+    if (existingIds.length === nextIds.length && existingIds.every((id, index) => id === nextIds[index])) {
+      updateLiveTimes(list);
+      return;
+    }
+
+    const previousIds = new Set(existingIds);
+    list.replaceChildren();
+    if (!normalizedItems.length) {
+      const empty = document.createElement("p");
+      empty.className = "empty-state";
+      empty.dataset.liveEmpty = "";
+      empty.textContent = "No inference results yet.";
+      list.appendChild(empty);
+      return;
+    }
+
+    const fragment = document.createDocumentFragment();
+    for (const item of normalizedItems) {
+      fragment.appendChild(createLiveStreamRow(item, previousIds.size > 0 && !previousIds.has(getStreamId(item))));
+    }
+    list.appendChild(fragment);
+  }
+
+  function updateLiveUpdated() {
+    const node = pageContent.querySelector("[data-live-updated]");
+    if (node) {
+      node.textContent = "Updated just now";
+    }
+  }
+
+  function readOpenDeviceIds(container) {
+    return new Set(
+      Array.from(container.querySelectorAll("details[data-device-id][open]"))
+        .map((node) => node.dataset.deviceId || "")
+        .filter(Boolean),
+    );
+  }
+
+  function restoreOpenDeviceIds(container, openIds) {
+    if (!openIds.size) {
+      return;
+    }
+    for (const node of container.querySelectorAll("details[data-device-id]")) {
+      if (openIds.has(node.dataset.deviceId || "")) {
+        node.open = true;
+      }
+    }
+  }
+
+  function replaceHtmlFragment(selector, html, { preserveOpenDevices = false } = {}) {
+    if (typeof html !== "string") {
+      return;
+    }
+    const container = pageContent.querySelector(selector);
+    if (!container || container.innerHTML === html) {
+      return;
+    }
+
+    const openIds = preserveOpenDevices ? readOpenDeviceIds(container) : new Set();
+    container.innerHTML = html;
+    if (preserveOpenDevices) {
+      restoreOpenDeviceIds(container, openIds);
+    }
+  }
+
+  function renderOverviewDeviceSections(payload) {
+    replaceHtmlFragment("[data-live-device-accordion]", payload.devices_html, { preserveOpenDevices: true });
+    replaceHtmlFragment("[data-live-recent-devices]", payload.recent_devices_html);
+  }
+
+  async function fetchOverviewLiveData() {
+    const limit = getOverviewLiveLimit();
+    const response = await fetch(`/api/overview/live?limit=${encodeURIComponent(limit)}`, {
+      headers: {
+        Accept: "application/json",
+      },
+      cache: "no-store",
+      credentials: "same-origin",
+    });
+    if (!response.ok) {
+      throw new Error(`Live stream refresh failed with ${response.status}`);
+    }
+    return response.json();
+  }
+
   async function navigate(urlLike, { replace = false, scroll = true } = {}) {
     const urlKey = normalizeUrl(urlLike);
     if (!urlKey || urlKey === getCurrentKey()) {
@@ -167,7 +403,17 @@
   function syncLiveRefresh() {
     clearLiveRefresh();
     const activePage = pageContent.dataset.pageKey || "";
-    if (!livePages.has(activePage)) {
+    if (activePage === overviewPageKey && getOverviewLivePanel()) {
+      updateLiveTimes(pageContent);
+      refreshTimerId = window.setInterval(() => {
+        if (document.hidden || refreshInFlight || shell.classList.contains("is-loading")) {
+          return;
+        }
+        void refreshOverviewLiveData();
+      }, overviewLiveRefreshMs);
+      return;
+    }
+    if (!fullRefreshPages.has(activePage)) {
       return;
     }
     refreshTimerId = window.setInterval(() => {
@@ -175,13 +421,13 @@
         return;
       }
       void refreshCurrentPage();
-    }, autoRefreshMs);
+    }, pageRefreshMs);
   }
 
   async function refreshCurrentPage() {
     const urlKey = getCurrentKey();
     const activePage = pageContent.dataset.pageKey || "";
-    if (!livePages.has(activePage)) {
+    if (!fullRefreshPages.has(activePage)) {
       return;
     }
 
@@ -197,6 +443,36 @@
     } finally {
       refreshInFlight = false;
     }
+  }
+
+  async function refreshOverviewLiveData() {
+    if ((pageContent.dataset.pageKey || "") !== overviewPageKey || !getOverviewLivePanel()) {
+      return;
+    }
+
+    refreshInFlight = true;
+    try {
+      const payload = await fetchOverviewLiveData();
+      if ((pageContent.dataset.pageKey || "") !== overviewPageKey) {
+        return;
+      }
+      updateOverviewSummary(payload.summary);
+      renderLiveStream(payload.items);
+      renderOverviewDeviceSections(payload);
+      updateLiveUpdated();
+    } catch (error) {
+      // Keep the last rendered rows visible when a local demo refresh races with ingestion.
+    } finally {
+      refreshInFlight = false;
+    }
+  }
+
+  function refreshActivePage() {
+    const activePage = pageContent.dataset.pageKey || "";
+    if (activePage === overviewPageKey) {
+      return refreshOverviewLiveData();
+    }
+    return refreshCurrentPage();
   }
 
   remember(getCurrentKey(), readState(document));
@@ -273,7 +549,7 @@
 
   document.addEventListener("visibilitychange", () => {
     if (!document.hidden) {
-      void refreshCurrentPage();
+      void refreshActivePage();
     }
   });
 })();

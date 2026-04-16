@@ -12,6 +12,7 @@ from brain.models.schema import NormalizedEvent, NormalizedHeartbeat
 
 
 HEARTBEAT_FRESH_SECONDS = 30
+HEARTBEAT_OFFLINE_SECONDS = 90
 
 
 class EventConflictError(ValueError):
@@ -26,9 +27,16 @@ class EventStoreResult:
 
 
 class BrainRepository:
-    def __init__(self, db_path: Path):
+    def __init__(
+        self,
+        db_path: Path,
+        heartbeat_fresh_seconds: int = HEARTBEAT_FRESH_SECONDS,
+        heartbeat_offline_seconds: int = HEARTBEAT_OFFLINE_SECONDS,
+    ):
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self.heartbeat_fresh_seconds = max(1, int(heartbeat_fresh_seconds))
+        self.heartbeat_offline_seconds = max(self.heartbeat_fresh_seconds, int(heartbeat_offline_seconds))
 
     def initialize(self) -> None:
         with self._connect() as connection:
@@ -315,6 +323,7 @@ class BrainRepository:
                     "reject_count": 0,
                 },
             )
+            heartbeat_freshness = self._heartbeat_freshness(row["last_heartbeat_received_at"], now)
             device_payload = {
                 "device_id": row["device_id"],
                 "event_count": event_count_lookup.get(row["device_id"], 0),
@@ -328,7 +337,12 @@ class BrainRepository:
                 "last_heartbeat_received_at": row["last_heartbeat_received_at"],
                 "last_heartbeat_timestamp": row["last_heartbeat_timestamp"],
                 "last_heartbeat_status": row["last_heartbeat_status"],
-                "heartbeat_freshness": self._heartbeat_freshness(row["last_heartbeat_received_at"], now),
+                "heartbeat_freshness": heartbeat_freshness,
+                "device_state": self._device_state(
+                    row["last_heartbeat_received_at"],
+                    row["last_heartbeat_status"],
+                    now,
+                ),
                 "accept_count": int(object_summary["accept_count"]),
                 "review_count": int(object_summary["review_count"]),
                 "reject_count": int(object_summary["reject_count"]),
@@ -349,7 +363,77 @@ class BrainRepository:
             "decision_counts": [dict(row) for row in decision_counts],
             "recent_devices": recent_device_rows,
             "devices": devices,
+            "heartbeat_thresholds": {
+                "fresh_seconds": self.heartbeat_fresh_seconds,
+                "offline_seconds": self.heartbeat_offline_seconds,
+            },
         }
+
+    def get_live_summary(self) -> dict[str, int]:
+        with self._connect() as connection:
+            totals = connection.execute(
+                """
+                SELECT
+                    (SELECT COUNT(*) FROM inference_events) AS total_events,
+                    (SELECT COUNT(*) FROM detected_objects) AS total_objects,
+                    (SELECT COUNT(*) FROM device_status) AS active_devices
+                """
+            ).fetchone()
+
+            decision_counts = connection.execute(
+                """
+                SELECT COALESCE(decision, 'Unknown') AS decision, COUNT(*) AS count
+                FROM detected_objects
+                GROUP BY COALESCE(decision, 'Unknown')
+                """
+            ).fetchall()
+
+        decision_lookup = {row["decision"]: int(row["count"]) for row in decision_counts}
+        return {
+            "total_events": int(totals["total_events"]),
+            "total_objects": int(totals["total_objects"]),
+            "active_devices": int(totals["active_devices"]),
+            "accept_count": decision_lookup.get("Accept", 0),
+            "review_count": decision_lookup.get("Review", 0),
+            "reject_count": decision_lookup.get("Reject", 0),
+        }
+
+    def get_live_inference_stream(self, limit: int = 10) -> list[dict[str, object]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT
+                    inference_events.event_uuid,
+                    inference_events.device_id,
+                    inference_events.timestamp,
+                    inference_events.received_at,
+                    detected_objects.object_index,
+                    detected_objects.object_id,
+                    detected_objects.label,
+                    detected_objects.confidence,
+                    detected_objects.decision
+                FROM detected_objects INDEXED BY idx_detected_objects_event_order
+                INNER JOIN inference_events ON inference_events.id = detected_objects.event_id
+                ORDER BY inference_events.received_at DESC, inference_events.id DESC, detected_objects.object_index ASC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+
+        return [
+            {
+                "id": f"{row['event_uuid']}:{row['object_index']}",
+                "event_uuid": row["event_uuid"],
+                "object_id": row["object_id"],
+                "device_id": row["device_id"],
+                "label": row["label"],
+                "decision": row["decision"],
+                "confidence": row["confidence"],
+                "timestamp": row["timestamp"],
+                "received_at": row["received_at"],
+            }
+            for row in rows
+        ]
 
     def get_recent_objects_for_event_page(
         self,
@@ -407,6 +491,38 @@ class BrainRepository:
 
     def get_recent_objects(self, limit: int = 50) -> list[dict[str, object]]:
         return self.get_recent_objects_for_event_page(event_limit=limit, event_offset=0, object_limit=limit)
+
+    def get_recent_object_results(self, limit: int = 25, offset: int = 0) -> list[dict[str, object]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT
+                    inference_events.event_uuid,
+                    inference_events.device_id,
+                    inference_events.timestamp,
+                    inference_events.received_at,
+                    detected_objects.object_index,
+                    detected_objects.object_id,
+                    detected_objects.label,
+                    detected_objects.confidence,
+                    detected_objects.score,
+                    detected_objects.decision,
+                    detected_objects.contamination_status,
+                    detected_objects.dirty_probability,
+                    detected_objects.clean_probability,
+                    detected_objects.bbox_x1,
+                    detected_objects.bbox_y1,
+                    detected_objects.bbox_x2,
+                    detected_objects.bbox_y2
+                FROM detected_objects INDEXED BY idx_detected_objects_event_order
+                INNER JOIN inference_events ON inference_events.id = detected_objects.event_id
+                ORDER BY inference_events.received_at DESC, inference_events.id DESC, detected_objects.object_index ASC
+                LIMIT ?
+                OFFSET ?
+                """,
+                (limit, offset),
+            ).fetchall()
+        return [dict(row) for row in rows]
 
     def get_recent_events(self, limit: int = 20, offset: int = 0) -> list[dict[str, object]]:
         with self._connect() as connection:
@@ -647,18 +763,39 @@ class BrainRepository:
             (device_id, received_at, kind, device_timestamp),
         )
 
-    @staticmethod
-    def _heartbeat_freshness(value: str | None, now: datetime) -> str:
+    def _heartbeat_freshness(self, value: str | None, now: datetime) -> str:
         if not value:
             return "never"
+        age_seconds = self._heartbeat_age_seconds(value, now)
+        if age_seconds is None:
+            return "stale"
+        return "fresh" if age_seconds <= self.heartbeat_fresh_seconds else "stale"
+
+    def _device_state(self, value: str | None, reported_status: str | None, now: datetime) -> str:
+        if not value:
+            return "unknown"
+
+        if (reported_status or "").strip().lower() == "offline":
+            return "offline"
+
+        age_seconds = self._heartbeat_age_seconds(value, now)
+        if age_seconds is None:
+            return "stale"
+        if age_seconds > self.heartbeat_offline_seconds:
+            return "offline"
+        if age_seconds <= self.heartbeat_fresh_seconds:
+            return "online"
+        return "stale"
+
+    @staticmethod
+    def _heartbeat_age_seconds(value: str, now: datetime) -> float | None:
         try:
             parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
         except ValueError:
-            return "stale"
+            return None
         if parsed.tzinfo is None:
             parsed = parsed.replace(tzinfo=UTC)
-        age_seconds = (now - parsed.astimezone(UTC)).total_seconds()
-        return "fresh" if age_seconds <= HEARTBEAT_FRESH_SECONDS else "stale"
+        return (now - parsed.astimezone(UTC)).total_seconds()
 
     @staticmethod
     def _utc_now() -> str:

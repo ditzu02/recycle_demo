@@ -2,16 +2,16 @@
 {% block content %}
 <section class="hero-grid">
   <article class="hero-card accent">
-    <p class="metric-label">Total events</p>
-    <p class="metric-value">{{ overview.total_events }}</p>
-  </article>
-  <article class="hero-card">
     <p class="metric-label">Detected objects</p>
-    <p class="metric-value">{{ overview.total_objects }}</p>
+    <p class="metric-value"><span data-live-summary="total_objects">{{ overview.total_objects }}</span></p>
   </article>
   <article class="hero-card">
     <p class="metric-label">Known devices</p>
-    <p class="metric-value">{{ overview.active_devices }}</p>
+    <p class="metric-value"><span data-live-summary="active_devices">{{ overview.active_devices }}</span></p>
+  </article>
+  <article class="hero-card">
+    <p class="metric-label">Accepted objects</p>
+    <p class="metric-value"><span data-live-summary="accept_count">{{ overview.accept_count }}</span></p>
   </article>
 </section>
 
@@ -26,125 +26,32 @@
         <strong>All devices</strong>
       </div>
       <div class="summary-meta">
-        <span class="chip count">{{ overview.active_devices }} active</span>
-        <span class="chip count">{{ overview.total_events }} events</span>
-        <span class="chip count">{{ overview.total_objects }} objects</span>
+        <span class="chip count"><span data-live-summary="active_devices">{{ overview.active_devices }}</span> active</span>
+        <span class="chip count"><span data-live-summary="total_objects">{{ overview.total_objects }}</span> objects</span>
+        <span class="chip source">1 object result per finalized edge payload</span>
       </div>
     </div>
     <div class="decision-strip">
       <div class="decision accept">
         <span>Accept</span>
-        <strong>{{ overview.accept_count }}</strong>
+        <strong data-live-summary="accept_count">{{ overview.accept_count }}</strong>
       </div>
       <div class="decision review">
         <span>Review</span>
-        <strong>{{ overview.review_count }}</strong>
+        <strong data-live-summary="review_count">{{ overview.review_count }}</strong>
       </div>
       <div class="decision reject">
         <span>Reject</span>
-        <strong>{{ overview.reject_count }}</strong>
+        <strong data-live-summary="reject_count">{{ overview.reject_count }}</strong>
       </div>
     </div>
   </div>
 
   <div class="device-list-surface">
     <p class="subsection-label">Per-device activity</p>
-    <div class="device-accordion">
-      {% for device in overview.devices %}
-      <details class="device-detail">
-        <summary>
-          <div class="device-summary-left">
-            <span class="status-dot" aria-hidden="true"></span>
-            <span class="chip device">{{ device.device_id }}</span>
-            <span class="chip count">{{ device.event_count }} events</span>
-            <span class="chip count">{{ device.object_count }} objects</span>
-            <span class="chip source">{{ device.last_contact_kind|replace('_', ' ')|title }}</span>
-          </div>
-          <div class="device-summary-right">
-            <span class="badge {{ device.heartbeat_freshness }}">{{ device.heartbeat_freshness|title }} heartbeat</span>
-            {% if device.last_heartbeat_status %}
-            <span class="chip source">{{ device.last_heartbeat_status|title }}</span>
-            {% endif %}
-            <span class="badge accept">Accept {{ device.accept_count }}</span>
-            <span class="badge review">Review {{ device.review_count }}</span>
-            <span class="badge reject">Reject {{ device.reject_count }}</span>
-            <div class="time-stack">
-              <span class="subsection-label">Last contact</span>
-              <time datetime="{{ device.last_seen }}" title="{{ device.last_seen }}">{{ device.last_seen|datetime_human }}</time>
-            </div>
-          </div>
-        </summary>
-        <div class="device-detail-body">
-          <div class="meta-list">
-            <div class="meta-row">
-              <span>Brain last contact</span>
-              <time datetime="{{ device.last_seen }}" title="{{ device.last_seen }}">{{ device.last_seen|datetime_human }}</time>
-            </div>
-            <div class="meta-row">
-              <span>Device timestamp</span>
-              {% if device.last_contact_device_timestamp %}
-              <time datetime="{{ device.last_contact_device_timestamp }}" title="{{ device.last_contact_device_timestamp }}">{{ device.last_contact_device_timestamp|datetime_human }}</time>
-              {% else %}
-              <span>-</span>
-              {% endif %}
-            </div>
-            <div class="meta-row">
-              <span>Last heartbeat</span>
-              <div class="meta-inline">
-                <span class="badge {{ device.heartbeat_freshness }}">{{ device.heartbeat_freshness|title }}</span>
-                {% if device.last_heartbeat_status %}
-                <span class="chip source">{{ device.last_heartbeat_status|title }}</span>
-                {% endif %}
-                {% if device.last_heartbeat_received_at %}
-                <time datetime="{{ device.last_heartbeat_received_at }}" title="{{ device.last_heartbeat_received_at }}">{{ device.last_heartbeat_received_at|datetime_human }}</time>
-                {% else %}
-                <span>-</span>
-                {% endif %}
-              </div>
-            </div>
-            <div class="meta-row">
-              <span>Last accepted event</span>
-              <div class="meta-inline">
-                {% if device.last_event_id %}
-                <span class="table-code">{{ device.last_event_id }}</span>
-                {% endif %}
-                {% if device.last_event_received_at %}
-                <time datetime="{{ device.last_event_received_at }}" title="{{ device.last_event_received_at }}">{{ device.last_event_received_at|datetime_human }}</time>
-                {% else %}
-                <span>-</span>
-                {% endif %}
-              </div>
-            </div>
-          </div>
-          <div class="decision-strip compact">
-            <div class="decision accept">
-              <span>Accept</span>
-              <strong>{{ device.accept_count }}</strong>
-            </div>
-            <div class="decision review">
-              <span>Review</span>
-              <strong>{{ device.review_count }}</strong>
-            </div>
-            <div class="decision reject">
-              <span>Reject</span>
-              <strong>{{ device.reject_count }}</strong>
-            </div>
-          </div>
-          <div class="device-class-list">
-            {% for row in device.class_counts %}
-            <div class="device-class-row">
-              <span class="device-class-label">{{ row.label }}</span>
-              <span class="chip count">{{ row.count }}</span>
-            </div>
-            {% else %}
-            <p class="empty-state">No objects stored for this device.</p>
-            {% endfor %}
-          </div>
-        </div>
-      </details>
-      {% else %}
-      <p class="empty-state">No device activity yet.</p>
-      {% endfor %}
+    <div class="device-accordion" data-live-device-accordion>
+      {% set devices = overview.devices %}
+      {% include "_overview_device_accordion.html" %}
     </div>
   </div>
 </section>
@@ -179,50 +86,40 @@
     <div class="panel-head">
       <h2>Recent device activity</h2>
     </div>
-    <div class="device-list">
-      {% for device in overview.recent_devices %}
-      <div class="device-row">
-        <div class="device-row-main">
-          <span class="status-dot" aria-hidden="true"></span>
-          <span class="chip device">{{ device.device_id }}</span>
-          <span class="chip source">{{ device.last_contact_kind|replace('_', ' ')|title }}</span>
-          <span class="chip count">{{ device.event_count }} events</span>
-          <span class="badge {{ device.heartbeat_freshness }}">{{ device.heartbeat_freshness|title }} heartbeat</span>
-          {% if device.last_heartbeat_status %}
-          <span class="chip source">{{ device.last_heartbeat_status|title }}</span>
-          {% endif %}
-        </div>
-        <div class="time-stack">
-          <span class="subsection-label">Last contact</span>
-          <time datetime="{{ device.last_seen }}" title="{{ device.last_seen }}">{{ device.last_seen|datetime_human }}</time>
-        </div>
-      </div>
-      {% else %}
-      <p class="empty-state">No device activity yet.</p>
-      {% endfor %}
+    <div class="device-list" data-live-recent-devices>
+      {% set recent_devices = overview.recent_devices %}
+      {% include "_overview_recent_devices.html" %}
     </div>
   </article>
 </section>
 
-<section class="panel">
+<section class="panel live-stream-panel" data-live-stream-panel data-live-limit="{{ live_stream_limit }}">
   <div class="panel-head">
-    <h2>Latest object results</h2>
+    <div>
+      <p class="subsection-label">Object window</p>
+      <h2>Live inference stream</h2>
+    </div>
+    <div class="live-status">
+      <span class="live-pill" aria-label="Live polling is active">Live</span>
+      <span class="chip source" data-live-updated>Server rendered</span>
+    </div>
   </div>
-  <div class="mini-table">
+  <div class="live-stream" data-live-stream-list>
     {% for row in recent_objects %}
     {% set confidence_tone = 'high' if row.confidence >= 0.85 else 'mid' if row.confidence >= 0.6 else 'low' %}
-    <div class="mini-row">
-      <div class="mini-row-main">
-        <strong>{{ row.label }}</strong>
+    <div class="live-row" data-stream-id="{{ row.id }}">
+      <div class="live-row-main">
         <span class="chip device">{{ row.device_id }}</span>
+        <strong>{{ row.label }}</strong>
       </div>
-      <div class="mini-row-right">
-        <span class="badge {{ (row.decision or 'Unknown').lower() }}">{{ row.decision or "Unknown" }}</span>
+      <div class="live-row-right">
+        <span class="badge {{ (row.decision or 'unknown').lower() }}">{{ row.decision or "Unknown" }}</span>
         <span class="chip confidence {{ confidence_tone }}">{{ "%.2f"|format(row.confidence) }}</span>
+        <time data-live-time datetime="{{ row.received_at }}" title="{{ row.received_at }}">{{ row.received_at|datetime_human }}</time>
       </div>
     </div>
     {% else %}
-    <p class="empty-state">No recent object rows yet.</p>
+    <p class="empty-state" data-live-empty>No inference results yet.</p>
     {% endfor %}
   </div>
 </section>
