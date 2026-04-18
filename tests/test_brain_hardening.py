@@ -274,7 +274,7 @@ class BrainHardeningTests(unittest.TestCase):
         self.assertIn("devices_html", payload)
         self.assertIn("recent_devices_html", payload)
         self.assertIn("data-device-id=\"pi_02\"", payload["devices_html"])
-        self.assertIn("Unknown", payload["devices_html"])
+        self.assertIn("UNKNOWN", payload["devices_html"])
         self.assertEqual(len(payload["items"]), 1)
 
         item = payload["items"][0]
@@ -320,24 +320,30 @@ class BrainHardeningTests(unittest.TestCase):
 
         status_code, overview_html = self._request_html("GET", "/")
         self.assertEqual(status_code, 200)
-        self.assertIn("Detected objects", overview_html)
+        self.assertIn("DETECTED OBJECTS", overview_html)
+        self.assertIn("DEVICES", overview_html)
+        self.assertIn("LIVE STREAM", overview_html)
         self.assertNotIn("Total events", overview_html)
-        self.assertIn("Last contact", overview_html)
+        self.assertNotIn("Recent device activity", overview_html)
+        self.assertIn("LAST CONTACT", overview_html)
         self.assertIn("heartbeat", overview_html.lower())
 
         status_code, objects_html = self._request_html("GET", "/events")
         self.assertEqual(status_code, 200)
-        self.assertIn("Latest detected objects", objects_html)
-        self.assertIn("Received", objects_html)
-        self.assertIn("Device Time", objects_html)
+        self.assertIn("RESULTS", objects_html)
+        self.assertIn("RECEIVED", objects_html)
+        self.assertIn("DEVICE TIME", objects_html)
         self.assertNotIn("Latest inference events", objects_html)
+        self.assertNotIn("Latest detected objects", objects_html)
 
         status_code, system_html = self._request_html("GET", "/api")
         self.assertEqual(status_code, 200)
-        self.assertIn("System interface", system_html)
-        self.assertIn("Edge to brain payload", system_html)
+        self.assertIn("INTERFACE", system_html)
+        self.assertIn("PAYLOAD", system_html)
+        self.assertIn("FLOW", system_html)
         self.assertIn("/api/inference", system_html)
         self.assertNotIn("Brain-v1 API explorer", system_html)
+        self.assertNotIn("Distributed edge-AI coordination", system_html)
 
     def _set_heartbeat_state(self, device_id: str, received_at: str, status: str) -> None:
         connection = sqlite3.connect(self.repository.db_path)

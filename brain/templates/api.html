@@ -2,11 +2,8 @@
 {% block content %}
 <section class="panel system-overview-panel">
   <div class="panel-head">
-    <div>
-      <p class="subsection-label">System overview</p>
-      <h2>Distributed edge-AI coordination</h2>
-    </div>
-    <span class="badge status">Local demo service</span>
+    <h2>SYSTEM</h2>
+    <span class="badge status">LOCAL</span>
   </div>
 
   <div class="system-summary-grid compact">
@@ -14,18 +11,25 @@
     <article class="summary-tile">
       <p class="metric-label">{{ card.label }}</p>
       <strong class="summary-tile-value">{{ card.value }}</strong>
+      {% if card.detail %}
       <span class="summary-tile-detail">{{ card.detail }}</span>
+      {% endif %}
     </article>
     {% endfor %}
   </div>
+</section>
 
+<section class="panel system-flow-panel">
+  <div class="panel-head">
+    <h2>FLOW</h2>
+  </div>
   <div class="system-flow" aria-label="System data flow">
     {% for step in system_flow %}
     <div class="system-flow-step">
       <span class="flow-index">{{ loop.index }}</span>
       <div>
         <strong>{{ step.title }}</strong>
-        <p>{{ step.description }}</p>
+        <span class="flow-detail">{{ step.description }}</span>
       </div>
     </div>
     {% endfor %}
@@ -35,13 +39,9 @@
 <section class="system-detail-grid">
   <article class="panel system-payload-card">
     <div class="panel-head">
-      <div>
-        <p class="subsection-label">Edge to brain payload</p>
-        <h2>Structured inference result</h2>
-      </div>
-      <span class="chip source">Brain-v1 JSON</span>
+      <h2>PAYLOAD</h2>
+      <span class="chip source">BRAIN-V1</span>
     </div>
-    <p class="api-copy">Each edge node performs local inference, finalizes one tracked-object result, and sends only the structured result to the brain.</p>
     <div class="system-note-list">
       {% for point in payload_points %}
       <div class="system-note-row">
@@ -52,7 +52,7 @@
     </div>
     <div class="code-surface">
       <div class="code-surface-head">
-        <span class="subsection-label">Representative request</span>
+        <span class="subsection-label">REQUEST</span>
       </div>
       <pre class="code-block compact"><code>{{ payload_example }}</code></pre>
     </div>
@@ -60,10 +60,7 @@
 
   <article class="panel system-notes-card">
     <div class="panel-head">
-      <div>
-        <p class="subsection-label">Coordination notes</p>
-        <h2>What the brain contributes</h2>
-      </div>
+      <h2>NOTES</h2>
     </div>
     <div class="system-note-list">
       {% for note in system_notes %}
@@ -74,37 +71,36 @@
       {% endfor %}
     </div>
     <div class="interface-timing">
-      <span class="chip count">Live stream {{ live_stream_refresh_seconds }}s polling</span>
-      <span class="chip count">Events {{ dashboard_refresh_seconds }}s refresh</span>
-      <span class="chip source">Local SQLite persistence</span>
+      <span class="chip count">LIVE {{ live_stream_refresh_seconds }}S</span>
+      <span class="chip count">EVENTS {{ dashboard_refresh_seconds }}S</span>
+      <span class="chip source">SQLITE</span>
     </div>
   </article>
 </section>
 
-<section class="system-section-head">
-  <div>
-    <p class="subsection-label">Brain endpoints</p>
-    <h2>System interface</h2>
+<section class="panel system-interface-panel">
+  <div class="panel-head">
+    <h2>INTERFACE</h2>
   </div>
-  <p>The routes below are the small local interface used by edge devices and dashboard views. Samples are intentionally compact so the page stays presentation-friendly.</p>
-</section>
-
-<section class="endpoint-grid">
+  <div class="endpoint-list">
   {% for endpoint in endpoints %}
-  <article class="panel endpoint-card">
+  <article class="route-row">
     <div class="endpoint-card-head">
       <span class="badge method {{ endpoint.method|lower() }}">{{ endpoint.method }}</span>
       <strong class="endpoint-path">{{ endpoint.path }}</strong>
-    </div>
-    <span class="chip source">{{ endpoint.role }}</span>
-    <p class="api-copy">{{ endpoint.description }}</p>
-    <div class="code-surface endpoint-sample">
-      <div class="code-surface-head">
-        <span class="subsection-label">{{ endpoint.sample_label }}</span>
+      <span class="chip source">{{ endpoint.role }}</span>
+      {% if endpoint.description %}
+      <span class="route-copy">{{ endpoint.description }}</span>
+      {% endif %}
       </div>
-      <pre class="code-block endpoint"><code>{{ endpoint.sample_body }}</code></pre>
-    </div>
-  </article>
+      <div class="code-surface endpoint-sample">
+        <div class="code-surface-head">
+          <span class="subsection-label">{{ endpoint.sample_label }}</span>
+        </div>
+        <pre class="code-block endpoint"><code>{{ endpoint.sample_body }}</code></pre>
+      </div>
+    </article>
   {% endfor %}
+  </div>
 </section>
 {% endblock %}

@@ -2,29 +2,27 @@
 {% block content %}
 <section class="panel">
   <div class="panel-head">
-    <div>
-      <p class="subsection-label">Object results</p>
-      <h2>Latest detected objects</h2>
-    </div>
+    <h2>RESULTS</h2>
     <div class="summary-meta">
-      <span class="chip count">Page {{ page }} · {{ objects|length }} objects</span>
-      <span class="chip source">One object result per finalized edge payload</span>
+      <span class="chip count">PAGE {{ page }}</span>
+      <span class="chip count">ROWS {{ objects|length }}</span>
+      <span class="chip source">BRAIN TIME</span>
     </div>
   </div>
   <div class="table-wrap">
     <table class="monitor-table">
       <thead>
         <tr>
-          <th class="col-time">Received</th>
-          <th class="col-time">Device Time</th>
-          <th class="col-device">Device</th>
-          <th>Class</th>
-          <th class="col-number">Confidence</th>
-          <th>Status</th>
-          <th class="col-number">Dirty p</th>
-          <th class="col-number">Score</th>
-          <th class="col-decision">Decision</th>
-          <th class="col-code">Bounding box</th>
+          <th class="col-time">RECEIVED</th>
+          <th class="col-time">DEVICE TIME</th>
+          <th class="col-device">DEVICE</th>
+          <th>CLASS</th>
+          <th class="col-number">CONF</th>
+          <th>STATUS</th>
+          <th class="col-number">DIRTY P</th>
+          <th class="col-number">SCORE</th>
+          <th class="col-decision">DECISION</th>
+          <th class="col-code">BBOX</th>
         </tr>
       </thead>
       <tbody>
@@ -52,7 +50,7 @@
         </tr>
         {% else %}
         <tr>
-          <td colspan="10" class="empty-cell">No object rows stored yet.</td>
+          <td colspan="10" class="empty-cell">NO RESULTS</td>
         </tr>
         {% endfor %}
       </tbody>
@@ -60,23 +58,23 @@
   </div>
 </section>
 
-<nav class="pager" aria-label="Object results pagination">
+<nav class="pager" aria-label="Events pagination">
   <div class="pager-meta">
-    <span class="chip count">Limit {{ limit }}</span>
-    <span class="chip source">Ordered by brain receive time</span>
-    <span class="chip source">Server-rendered page {{ page }}</span>
+    <span class="chip count">LIMIT {{ limit }}</span>
+    <span class="chip source">PAGE {{ page }}</span>
+    <span class="chip source">LATEST FIRST</span>
   </div>
   <div class="pager-actions">
     {% if has_previous %}
-    <a class="pager-link" href="/events?page={{ previous_page }}&limit={{ limit }}">Previous</a>
+    <a class="pager-link" href="/events?page={{ previous_page }}&limit={{ limit }}">PREV</a>
     {% else %}
-    <span class="pager-link disabled" aria-disabled="true">Previous</span>
+    <span class="pager-link disabled" aria-disabled="true">PREV</span>
     {% endif %}
 
     {% if has_next %}
-    <a class="pager-link" href="/events?page={{ next_page }}&limit={{ limit }}">Next</a>
+    <a class="pager-link" href="/events?page={{ next_page }}&limit={{ limit }}">NEXT</a>
     {% else %}
-    <span class="pager-link disabled" aria-disabled="true">Next</span>
+    <span class="pager-link disabled" aria-disabled="true">NEXT</span>
     {% endif %}
   </div>
 </nav>

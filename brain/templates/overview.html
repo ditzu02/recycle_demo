@@ -1,126 +1,112 @@
 {% extends "base.html" %}
 {% block content %}
-<section class="hero-grid">
-  <article class="hero-card accent">
-    <p class="metric-label">Detected objects</p>
+<section class="status-strip">
+  <article class="status-tile">
+    <p class="metric-label">DETECTED OBJECTS</p>
     <p class="metric-value"><span data-live-summary="total_objects">{{ overview.total_objects }}</span></p>
   </article>
-  <article class="hero-card">
-    <p class="metric-label">Known devices</p>
+  <article class="status-tile">
+    <p class="metric-label">DEVICES</p>
     <p class="metric-value"><span data-live-summary="active_devices">{{ overview.active_devices }}</span></p>
   </article>
-  <article class="hero-card">
-    <p class="metric-label">Accepted objects</p>
+  <article class="status-tile">
+    <p class="metric-label">ACCEPTED</p>
     <p class="metric-value"><span data-live-summary="accept_count">{{ overview.accept_count }}</span></p>
+  </article>
+  <article class="status-tile">
+    <p class="metric-label">REVIEW</p>
+    <p class="metric-value"><span data-live-summary="review_count">{{ overview.review_count }}</span></p>
+  </article>
+  <article class="status-tile">
+    <p class="metric-label">REJECT</p>
+    <p class="metric-value"><span data-live-summary="reject_count">{{ overview.reject_count }}</span></p>
   </article>
 </section>
 
-<section class="panel">
-  <div class="panel-head">
-    <h2>Decision summary</h2>
-  </div>
-  <div class="summary-block summary-surface">
-    <div class="summary-overview">
-      <div class="summary-lead">
-        <p class="subsection-label">System aggregate</p>
-        <strong>All devices</strong>
-      </div>
-      <div class="summary-meta">
-        <span class="chip count"><span data-live-summary="active_devices">{{ overview.active_devices }}</span> active</span>
-        <span class="chip count"><span data-live-summary="total_objects">{{ overview.total_objects }}</span> objects</span>
-        <span class="chip source">1 object result per finalized edge payload</span>
-      </div>
+<section class="overview-grid">
+  <article class="panel devices-panel">
+    <div class="panel-head">
+      <h2>DEVICES</h2>
     </div>
-    <div class="decision-strip">
-      <div class="decision accept">
-        <span>Accept</span>
-        <strong data-live-summary="accept_count">{{ overview.accept_count }}</strong>
-      </div>
-      <div class="decision review">
-        <span>Review</span>
-        <strong data-live-summary="review_count">{{ overview.review_count }}</strong>
-      </div>
-      <div class="decision reject">
-        <span>Reject</span>
-        <strong data-live-summary="reject_count">{{ overview.reject_count }}</strong>
-      </div>
-    </div>
-  </div>
-
-  <div class="device-list-surface">
-    <p class="subsection-label">Per-device activity</p>
     <div class="device-accordion" data-live-device-accordion>
       {% set devices = overview.devices %}
       {% include "_overview_device_accordion.html" %}
     </div>
-  </div>
-</section>
+  </article>
 
-<section class="content-grid">
-  <article class="panel">
-    <div class="panel-head">
-      <h2>Objects by class</h2>
-    </div>
-    <div class="bar-list">
-      {% for row in overview.class_counts %}
-      {% set percent = (row.count / overview.total_objects * 100) if overview.total_objects else 0 %}
-      <div class="bar-row">
-        <div class="bar-meta">
-          <div class="bar-meta-main">
-            <strong>{{ row.label }}</strong>
-            <span class="bar-percent">{{ "%.0f"|format(percent) }}%</span>
+  <div class="panel-stack">
+    <article class="panel">
+      <div class="panel-head">
+        <h2>STATUS</h2>
+      </div>
+      <div class="decision-strip compact">
+        <div class="decision accept">
+          <span>ACCEPT</span>
+          <strong data-live-summary="accept_count">{{ overview.accept_count }}</strong>
+        </div>
+        <div class="decision review">
+          <span>REVIEW</span>
+          <strong data-live-summary="review_count">{{ overview.review_count }}</strong>
+        </div>
+        <div class="decision reject">
+          <span>REJECT</span>
+          <strong data-live-summary="reject_count">{{ overview.reject_count }}</strong>
+        </div>
+      </div>
+    </article>
+
+    <article class="panel">
+      <div class="panel-head">
+        <h2>CLASSES</h2>
+      </div>
+      <div class="bar-list">
+        {% for row in overview.class_counts %}
+        {% set percent = (row.count / overview.total_objects * 100) if overview.total_objects else 0 %}
+        <div class="bar-row">
+          <div class="bar-meta">
+            <div class="bar-meta-main">
+              <strong>{{ row.label }}</strong>
+              <span class="bar-percent">{{ "%.0f"|format(percent) }}%</span>
+            </div>
+            <span class="chip count">{{ row.count }}</span>
           </div>
-          <span class="chip count">{{ row.count }}</span>
+          <div class="bar-track">
+            <div class="bar-fill" style="width: {{ percent }}%;"></div>
+          </div>
         </div>
-        <div class="bar-track">
-          <div class="bar-fill" style="width: {{ percent }}%;"></div>
+        {% else %}
+        <p class="empty-state">NO DATA</p>
+        {% endfor %}
+      </div>
+    </article>
+
+    <section class="panel live-stream-panel" data-live-stream-panel data-live-limit="{{ live_stream_limit }}">
+      <div class="panel-head">
+        <h2>LIVE STREAM</h2>
+        <div class="live-status">
+          <span class="live-pill" aria-label="Live polling is active">LIVE</span>
+          <span class="chip source" data-live-updated>SYNC</span>
         </div>
       </div>
-      {% else %}
-      <p class="empty-state">No objects stored yet.</p>
-      {% endfor %}
-    </div>
-  </article>
-
-  <article class="panel">
-    <div class="panel-head">
-      <h2>Recent device activity</h2>
-    </div>
-    <div class="device-list" data-live-recent-devices>
-      {% set recent_devices = overview.recent_devices %}
-      {% include "_overview_recent_devices.html" %}
-    </div>
-  </article>
-</section>
-
-<section class="panel live-stream-panel" data-live-stream-panel data-live-limit="{{ live_stream_limit }}">
-  <div class="panel-head">
-    <div>
-      <p class="subsection-label">Object window</p>
-      <h2>Live inference stream</h2>
-    </div>
-    <div class="live-status">
-      <span class="live-pill" aria-label="Live polling is active">Live</span>
-      <span class="chip source" data-live-updated>Server rendered</span>
-    </div>
-  </div>
-  <div class="live-stream" data-live-stream-list>
-    {% for row in recent_objects %}
-    {% set confidence_tone = 'high' if row.confidence >= 0.85 else 'mid' if row.confidence >= 0.6 else 'low' %}
-    <div class="live-row" data-stream-id="{{ row.id }}">
-      <div class="live-row-main">
-        <span class="chip device">{{ row.device_id }}</span>
-        <strong>{{ row.label }}</strong>
+      <div class="live-stream" data-live-stream-list>
+        {% for row in recent_objects %}
+        {% set confidence_tone = 'high' if row.confidence >= 0.85 else 'mid' if row.confidence >= 0.6 else 'low' %}
+        <div class="live-row" data-stream-id="{{ row.id }}">
+          <div class="live-row-main">
+            <span class="chip device">{{ row.device_id }}</span>
+            <strong>{{ row.label }}</strong>
+          </div>
+          <div class="live-row-right">
+            <span class="badge {{ (row.decision or 'unknown').lower() }}">{{ row.decision or "Unknown" }}</span>
+            <span class="chip confidence {{ confidence_tone }}">{{ "%.2f"|format(row.confidence) }}</span>
+            <time data-live-time datetime="{{ row.received_at }}" title="{{ row.received_at }}">{{ row.received_at|datetime_human }}</time>
+          </div>
+        </div>
+        {% else %}
+        <p class="empty-state" data-live-empty>NO RESULTS</p>
+        {% endfor %}
       </div>
-      <div class="live-row-right">
-        <span class="badge {{ (row.decision or 'unknown').lower() }}">{{ row.decision or "Unknown" }}</span>
-        <span class="chip confidence {{ confidence_tone }}">{{ "%.2f"|format(row.confidence) }}</span>
-        <time data-live-time datetime="{{ row.received_at }}" title="{{ row.received_at }}">{{ row.received_at|datetime_human }}</time>
-      </div>
-    </div>
-    {% else %}
-    <p class="empty-state" data-live-empty>No inference results yet.</p>
-    {% endfor %}
+    </section>
   </div>
 </section>
 {% endblock %}

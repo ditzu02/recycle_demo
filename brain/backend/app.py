@@ -125,9 +125,9 @@ class BrainApplication:
         overview = self.repository.get_overview(device_limit=8, recent_device_limit=8)
         template = self.templates.get_template("overview.html")
         body = template.render(
-            title="Recycle Brain | Overview",
-            page_name="Overview",
-            page_description="Central monitoring dashboard for finalized inspection traffic, device liveness, and recent edge-node output.",
+            title="Brain | Overview",
+            page_name="OVERVIEW",
+            page_description="",
             active_page="overview",
             overview=overview,
             live_stream_limit=LIVE_STREAM_LIMIT,
@@ -152,9 +152,9 @@ class BrainApplication:
         objects = objects[:limit]
         template = self.templates.get_template("events.html")
         body = template.render(
-            title="Recycle Brain | Events",
-            page_name="Events",
-            page_description="Detected object results reported by the distributed edge-AI nodes and stored by the local brain.",
+            title="Brain | Events",
+            page_name="EVENTS",
+            page_description="",
             active_page="events",
             objects=objects,
             page=page,
@@ -194,76 +194,76 @@ class BrainApplication:
         }
         template = self.templates.get_template("api.html")
         body = template.render(
-            title="Recycle Brain | System",
-            page_name="System",
-            page_description="Distributed edge-AI coordination layer: structured edge payloads, local brain storage, and dashboard-facing interfaces.",
+            title="Brain | System",
+            page_name="SYSTEM",
+            page_description="",
             active_page="api",
             summary_cards=[
                 {
-                    "label": "Runtime",
-                    "value": "Local brain",
-                    "detail": "WSGI service + SQLite store",
+                    "label": "MODE",
+                    "value": "LOCAL",
+                    "detail": "WSGI / SQLITE",
                 },
                 {
-                    "label": "Known devices",
+                    "label": "DEVICES",
                     "value": overview["active_devices"],
-                    "detail": "edge nodes seen by the brain",
+                    "detail": "SEEN",
                 },
                 {
-                    "label": "Object results",
+                    "label": "OBJECTS",
                     "value": overview["total_objects"],
-                    "detail": "detected objects stored locally",
+                    "detail": "STORED",
                 },
                 {
-                    "label": "Accepted objects",
+                    "label": "ACCEPT",
                     "value": overview["accept_count"],
-                    "detail": "results with accept decision",
+                    "detail": "CURRENT",
                 },
             ],
             system_flow=[
                 {
-                    "title": "Edge inference",
-                    "description": "Raspberry Pi nodes detect objects locally and finalize one result per tracked object.",
+                    "title": "EDGE",
+                    "description": "LOCAL INFERENCE",
                 },
                 {
-                    "title": "Structured ingest",
-                    "description": "The brain accepts Brain-v1 JSON and validates schema, device, result, and object fields.",
+                    "title": "INGEST",
+                    "description": "JSON VALIDATION",
                 },
                 {
-                    "title": "Local aggregation",
-                    "description": "Object results and heartbeats are stored locally and summarized per device.",
+                    "title": "STORE",
+                    "description": "SQLITE",
                 },
                 {
-                    "title": "Dashboard interface",
-                    "description": "Overview and Events read compact JSON or server-rendered views for the demo.",
+                    "title": "VIEW",
+                    "description": "POLLING UI",
                 },
             ],
             payload_example=_pretty_json(sample_inference_payload),
             payload_points=[
-                "Current edge runtime sends one finalized object result per request.",
-                "The edge keeps inference local; the brain receives structured results.",
-                "Device and brain timestamps are both retained for provenance.",
+                "ONE OBJECT / REQUEST",
+                "EDGE INFERENCE STAYS LOCAL",
+                "EDGE TIME + BRAIN TIME",
             ],
             system_notes=[
-                "The brain is the coordination point for multiple independent edge devices.",
-                "Duplicate result IDs are handled safely so edge retries do not create duplicate rows.",
-                "The demo remains fully local: no cloud services, no WebSockets, and no external database.",
+                "MULTI-DEVICE COORDINATION",
+                "IDEMPOTENT RESULT IDS",
+                "LOCAL ONLY",
             ],
             endpoints=[
                 {
                     "method": "GET",
                     "path": "/health",
-                    "role": "Service check",
-                    "description": "Confirms that the local brain process is reachable.",
-                    "sample_label": "Response",
+                    "role": "CHECK",
+                    "description": "PROCESS",
+                    "sample_label": "RESP",
                     "sample_body": _pretty_json({"status": "ok"}),
                 },
                 {
                     "method": "POST",
                     "path": "/api/inference",
-                    "role": "Edge write",
-                    "description": "Stores one finalized object result from an edge node.",
-                    "sample_label": "Response",
+                    "role": "WRITE",
+                    "description": "RESULT",
+                    "sample_label": "RESP",
                     "sample_body": _pretty_json(
                         {
                             "status": "ok",
@@ -276,9 +276,9 @@ class BrainApplication:
                 {
                     "method": "POST",
                     "path": "/api/heartbeat",
-                    "role": "Edge liveness",
-                    "description": "Updates last-contact state without creating inspection rows.",
-                    "sample_label": "Response",
+                    "role": "LIVENESS",
+                    "description": "DEVICE STATE",
+                    "sample_label": "RESP",
                     "sample_body": _pretty_json(
                         {
                             "status": "ok",
@@ -290,9 +290,9 @@ class BrainApplication:
                 {
                     "method": "GET",
                     "path": "/api/overview",
-                    "role": "Dashboard read",
-                    "description": "Returns object-result totals and per-device activity summaries.",
-                    "sample_label": "Shape",
+                    "role": "READ",
+                    "description": "SUMMARY",
+                    "sample_label": "SHAPE",
                     "sample_body": _pretty_json(
                         {
                             "total_objects": overview["total_objects"],
@@ -304,9 +304,9 @@ class BrainApplication:
                 {
                     "method": "GET",
                     "path": "/api/overview/live?limit=10",
-                    "role": "Live panel",
-                    "description": "Small polling payload for the Overview live inference stream.",
-                    "sample_label": "Shape",
+                    "role": "LIVE",
+                    "description": "STREAM",
+                    "sample_label": "SHAPE",
                     "sample_body": _pretty_json(
                         {
                             "summary": {
@@ -326,9 +326,9 @@ class BrainApplication:
                 {
                     "method": "GET",
                     "path": "/api/events?limit=20",
-                    "role": "Object history",
-                    "description": "Provides recent object result rows for the Events page.",
-                    "sample_label": "Shape",
+                    "role": "READ",
+                    "description": "RESULTS",
+                    "sample_label": "SHAPE",
                     "sample_body": _pretty_json(
                         {
                             "objects": [{"label": "...", "decision": "..."}],

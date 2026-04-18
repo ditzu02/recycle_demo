@@ -4,20 +4,17 @@
     <div class="device-summary-left">
       <span class="status-dot {{ device.device_state }}" aria-hidden="true"></span>
       <span class="chip device">{{ device.device_id }}</span>
-      <span class="badge {{ device.device_state }}">{{ device.device_state|title }}</span>
-      <span class="chip count">{{ device.object_count }} objects</span>
-      <span class="chip source">{{ device.last_contact_kind|replace('_', ' ')|title }}</span>
+      <span class="badge {{ device.device_state }}">{{ device.device_state|upper }}</span>
+      <span class="chip count">{{ device.object_count }} OBJ</span>
+      <span class="chip source">{{ "RESULT" if device.last_contact_kind == "event" else device.last_contact_kind|replace('_', ' ')|upper }}</span>
     </div>
     <div class="device-summary-right">
-      <span class="badge {{ device.heartbeat_freshness }}">{{ device.heartbeat_freshness|title }} heartbeat</span>
+      <span class="badge {{ device.heartbeat_freshness }}">HB {{ device.heartbeat_freshness|upper }}</span>
       {% if device.last_heartbeat_status %}
-      <span class="chip source">{{ device.last_heartbeat_status|title }}</span>
+      <span class="chip source">{{ device.last_heartbeat_status|upper }}</span>
       {% endif %}
-      <span class="badge accept">Accept {{ device.accept_count }}</span>
-      <span class="badge review">Review {{ device.review_count }}</span>
-      <span class="badge reject">Reject {{ device.reject_count }}</span>
       <div class="time-stack">
-        <span class="subsection-label">Last contact</span>
+        <span class="subsection-label">LAST CONTACT</span>
         <time datetime="{{ device.last_seen }}" title="{{ device.last_seen }}">{{ device.last_seen|datetime_human }}</time>
       </div>
     </div>
@@ -25,15 +22,15 @@
   <div class="device-detail-body">
     <div class="meta-list">
       <div class="meta-row">
-        <span>Derived state</span>
-        <span class="badge {{ device.device_state }}">{{ device.device_state|title }}</span>
+        <span>STATE</span>
+        <span class="badge {{ device.device_state }}">{{ device.device_state|upper }}</span>
       </div>
       <div class="meta-row">
-        <span>Brain last contact</span>
+        <span>LAST CONTACT</span>
         <time datetime="{{ device.last_seen }}" title="{{ device.last_seen }}">{{ device.last_seen|datetime_human }}</time>
       </div>
       <div class="meta-row">
-        <span>Device timestamp</span>
+        <span>DEVICE TIME</span>
         {% if device.last_contact_device_timestamp %}
         <time datetime="{{ device.last_contact_device_timestamp }}" title="{{ device.last_contact_device_timestamp }}">{{ device.last_contact_device_timestamp|datetime_human }}</time>
         {% else %}
@@ -41,11 +38,11 @@
         {% endif %}
       </div>
       <div class="meta-row">
-        <span>Last heartbeat</span>
+        <span>HEARTBEAT</span>
         <div class="meta-inline">
-          <span class="badge {{ device.heartbeat_freshness }}">{{ device.heartbeat_freshness|title }}</span>
+          <span class="badge {{ device.heartbeat_freshness }}">{{ device.heartbeat_freshness|upper }}</span>
           {% if device.last_heartbeat_status %}
-          <span class="chip source">{{ device.last_heartbeat_status|title }}</span>
+          <span class="chip source">{{ device.last_heartbeat_status|upper }}</span>
           {% endif %}
           {% if device.last_heartbeat_received_at %}
           <time datetime="{{ device.last_heartbeat_received_at }}" title="{{ device.last_heartbeat_received_at }}">{{ device.last_heartbeat_received_at|datetime_human }}</time>
@@ -55,7 +52,7 @@
         </div>
       </div>
       <div class="meta-row">
-        <span>Last object result</span>
+        <span>LAST RESULT</span>
         <div class="meta-inline">
           {% if device.last_event_id %}
           <span class="table-code">{{ device.last_event_id }}</span>
@@ -70,15 +67,15 @@
     </div>
     <div class="decision-strip compact">
       <div class="decision accept">
-        <span>Accept</span>
+        <span>ACCEPT</span>
         <strong>{{ device.accept_count }}</strong>
       </div>
       <div class="decision review">
-        <span>Review</span>
+        <span>REVIEW</span>
         <strong>{{ device.review_count }}</strong>
       </div>
       <div class="decision reject">
-        <span>Reject</span>
+        <span>REJECT</span>
         <strong>{{ device.reject_count }}</strong>
       </div>
     </div>
@@ -89,11 +86,11 @@
         <span class="chip count">{{ row.count }}</span>
       </div>
       {% else %}
-      <p class="empty-state">No objects stored for this device.</p>
+      <p class="empty-state">NO DATA</p>
       {% endfor %}
     </div>
   </div>
 </details>
 {% else %}
-<p class="empty-state">No device activity yet.</p>
+<p class="empty-state">NO DEVICES</p>
 {% endfor %}

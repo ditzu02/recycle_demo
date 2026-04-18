@@ -10,16 +10,13 @@
   <body>
     <div class="page-shell" data-page-key="{{ active_page }}">
       <header class="site-header">
-        <div class="site-brand">
-          <p class="eyebrow">Distributed edge-AI monitoring</p>
-          <h1>Recycle Brain</h1>
+        <div class="site-headline">
           <p class="page-title" id="page-name">{{ page_name }}</p>
-          <p class="subtitle" id="page-description">{{ page_description }}</p>
         </div>
         <nav class="site-nav">
-          <a href="/" data-page="overview" class="{% if active_page == 'overview' %}active{% endif %}" {% if active_page == 'overview' %}aria-current="page"{% endif %}>Overview</a>
-          <a href="/events" data-page="events" class="{% if active_page == 'events' %}active{% endif %}" {% if active_page == 'events' %}aria-current="page"{% endif %}>Events</a>
-          <a href="/api" data-page="api" class="{% if active_page == 'api' %}active{% endif %}" {% if active_page == 'api' %}aria-current="page"{% endif %}>System</a>
+          <a href="/" data-page="overview" class="{% if active_page == 'overview' %}active{% endif %}" {% if active_page == 'overview' %}aria-current="page"{% endif %}>OVERVIEW</a>
+          <a href="/events" data-page="events" class="{% if active_page == 'events' %}active{% endif %}" {% if active_page == 'events' %}aria-current="page"{% endif %}>EVENTS</a>
+          <a href="/api" data-page="api" class="{% if active_page == 'api' %}active{% endif %}" {% if active_page == 'api' %}aria-current="page"{% endif %}>SYSTEM</a>
         </nav>
       </header>
       <main id="page-content" data-page-key="{{ active_page }}">
