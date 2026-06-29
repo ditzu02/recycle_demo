@@ -14,7 +14,7 @@
   let refreshTimerId = 0;
   let refreshInFlight = false;
 
-  if (!shell || !pageName || !pageDescription || !pageContent || !navLinks.length || !window.history.pushState) {
+  if (!shell || !pageName || !pageContent || !navLinks.length || !window.history.pushState) {
     return;
   }
 
@@ -42,14 +42,14 @@
     const nextPageName = doc.getElementById("page-name");
     const nextPageDescription = doc.getElementById("page-description");
     const nextPageContent = doc.getElementById("page-content");
-    if (!nextPageName || !nextPageDescription || !nextPageContent) {
+    if (!nextPageName || !nextPageContent) {
       return null;
     }
 
     return {
       title: doc.title,
       pageName: nextPageName.textContent || "",
-      pageDescription: nextPageDescription.textContent || "",
+      pageDescription: nextPageDescription ? nextPageDescription.textContent || "" : "",
       activePage: nextPageContent.dataset.pageKey || "",
       contentHtml: nextPageContent.innerHTML,
     };
@@ -93,7 +93,9 @@
   function render(state, { scroll = true } = {}) {
     document.title = state.title;
     pageName.textContent = state.pageName;
-    pageDescription.textContent = state.pageDescription;
+    if (pageDescription) {
+      pageDescription.textContent = state.pageDescription;
+    }
     pageContent.innerHTML = state.contentHtml;
     pageContent.dataset.pageKey = state.activePage;
     shell.dataset.pageKey = state.activePage;
@@ -289,7 +291,7 @@
       const empty = document.createElement("p");
       empty.className = "empty-state";
       empty.dataset.liveEmpty = "";
-      empty.textContent = "No inference results yet.";
+      empty.textContent = "NO RESULTS";
       list.appendChild(empty);
       return;
     }
@@ -304,7 +306,7 @@
   function updateLiveUpdated() {
     const node = pageContent.querySelector("[data-live-updated]");
     if (node) {
-      node.textContent = "Updated just now";
+      node.textContent = "JUST NOW";
     }
   }
 

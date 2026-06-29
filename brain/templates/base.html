@@ -12,6 +12,7 @@
       <header class="site-header">
         <div class="site-headline">
           <p class="page-title" id="page-name">{{ page_name }}</p>
+          <p id="page-description" hidden>{{ page_description }}</p>
         </div>
         <nav class="site-nav">
           <a href="/" data-page="overview" class="{% if active_page == 'overview' %}active{% endif %}" {% if active_page == 'overview' %}aria-current="page"{% endif %}>OVERVIEW</a>
