@@ -65,6 +65,12 @@ Save local debug images for each finalized event:
 ./.venv/bin/python -m edge --device-id edge_demo_01 --show --save-debug-images
 ```
 
+Save a run log with FPS, latency, event attempts, duplicate responses, conflicts, and heartbeat counts:
+
+```bash
+./.venv/bin/python -m edge --device-id edge_demo_01 --show --save-run-log
+```
+
 Point the runtime at a different brain host:
 
 ```bash
@@ -83,6 +89,19 @@ Run with the exported ONNX detector:
 ./.venv/bin/python -m edge --device-id edge_demo_01 --yolo-model-path best8S.onnx
 ```
 
+Reviewer-data run profile using the ONNX detector at 416 px:
+
+```bash
+./.venv/bin/python -m edge \
+  --device-id edge_demo_01 \
+  --brain-base-url http://<laptop-ip>:8000 \
+  --yolo-model-path best8S.onnx \
+  --yolo-imgsz 416 \
+  --show \
+  --save-debug-images \
+  --save-run-log
+```
+
 Useful runtime knobs:
 
 - `EDGE_DEVICE_ID`
@@ -93,6 +112,7 @@ Useful runtime knobs:
 - `EDGE_CAMERA_WIDTH`
 - `EDGE_CAMERA_HEIGHT`
 - `EDGE_YOLO_MODEL_PATH`
+- `EDGE_YOLO_IMGSZ`
 - `EDGE_YOLO_CONFIDENCE_FLOOR`
 - `EDGE_YOLO_CLASS_NAMES`
 - `EDGE_CONFIDENCE_THRESHOLD`
@@ -105,6 +125,8 @@ Useful runtime knobs:
 - `EDGE_EVALUATION_ZONE`
 - `EDGE_DEBUG_SAVE_IMAGES`
 - `EDGE_DEBUG_OUTPUT_DIR`
+- `EDGE_SAVE_RUN_LOG`
+- `EDGE_RUN_LOG_PATH`
 - `EDGE_SHOW_PREVIEW`
 
 ### Edge Notes
@@ -122,6 +144,7 @@ Useful runtime knobs:
 - The runtime emits one finalized Brain-v1 event per completed tracked-object lifecycle.
 - A track is evaluated once per pass through the gate and emits once when it leaves the zone or disappears after evaluation.
 - When debug image saving is enabled, the runtime stores the finalized event's evaluation crop and an annotated frame in `edge_debug/` by default.
+- When run logging is enabled, the runtime stores a JSON summary in `edge_debug/` by default with frame timing, FPS, event HTTP attempts, duplicate responses, conflict responses, heartbeat counts, and latency summaries.
 - `event_id` includes the device id, a runtime session token, the finalized frame index, and the track number so retries stay stable without reusing ids across separate runs.
 - `inspection_outcome` is always included as an object and stays `{}` in this phase.
 - Heartbeats are sent to `POST /api/heartbeat`.

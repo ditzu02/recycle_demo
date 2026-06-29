@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import logging
+import json
 import re
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Callable
@@ -26,6 +27,111 @@ class PendingEvent:
     inspection: FinalizedInspection
     track: TrackState
     next_attempt_at: float = 0.0
+
+
+@dataclass
+class RunStats:
+    device_id: str
+    session_identifier: str
+    yolo_model_path: str
+    yolo_image_size: int
+    yolo_confidence_floor: float
+    confidence_threshold: float
+    allowed_classes: tuple[str, ...]
+    heartbeat_interval_seconds: float
+    started_at: datetime | None = None
+    ended_at: datetime | None = None
+    duration_seconds: float = 0.0
+    processed_frames: int = 0
+    frame_processing_ms: list[float] = field(default_factory=list)
+    finalized_events: int = 0
+    event_http_attempts: int = 0
+    event_accepted: int = 0
+    event_duplicates: int = 0
+    event_conflicts: int = 0
+    event_failed: int = 0
+    event_retry_scheduled: int = 0
+    event_latency_ms: list[float] = field(default_factory=list)
+    event_total_http_elapsed_ms: list[float] = field(default_factory=list)
+    heartbeat_attempts: int = 0
+    heartbeat_accepted: int = 0
+    heartbeat_failed: int = 0
+    heartbeat_latency_ms: list[float] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, object]:
+        run_fps = self.processed_frames / self.duration_seconds if self.duration_seconds > 0 else 0.0
+        avg_frame_ms = _average(self.frame_processing_ms)
+        processing_fps = 1000.0 / avg_frame_ms if avg_frame_ms and avg_frame_ms > 0 else 0.0
+        return {
+            "run": {
+                "device_id": self.device_id,
+                "session_identifier": self.session_identifier,
+                "started_at": _format_datetime(self.started_at),
+                "ended_at": _format_datetime(self.ended_at),
+                "duration_seconds": round(self.duration_seconds, 3),
+            },
+            "configuration": {
+                "yolo_model_path": self.yolo_model_path,
+                "yolo_image_size": self.yolo_image_size,
+                "yolo_confidence_floor": self.yolo_confidence_floor,
+                "confidence_threshold": self.confidence_threshold,
+                "allowed_classes": list(self.allowed_classes),
+                "heartbeat_interval_seconds": self.heartbeat_interval_seconds,
+            },
+            "frames": {
+                "processed": self.processed_frames,
+                "run_fps": round(run_fps, 3),
+                "processing_fps": round(processing_fps, 3),
+                "processing_ms": _metric_summary(self.frame_processing_ms),
+            },
+            "events": {
+                "finalized": self.finalized_events,
+                "http_attempts": self.event_http_attempts,
+                "accepted": self.event_accepted,
+                "duplicate_responses": self.event_duplicates,
+                "conflict_responses": self.event_conflicts,
+                "failed": self.event_failed,
+                "retry_scheduled": self.event_retry_scheduled,
+                "latency_ms": _metric_summary(self.event_latency_ms),
+                "total_http_elapsed_ms": _metric_summary(self.event_total_http_elapsed_ms),
+            },
+            "heartbeats": {
+                "http_attempts": self.heartbeat_attempts,
+                "accepted": self.heartbeat_accepted,
+                "failed": self.heartbeat_failed,
+                "latency_ms": _metric_summary(self.heartbeat_latency_ms),
+            },
+        }
+
+
+def _metric_summary(values: list[float]) -> dict[str, float | int | None]:
+    if not values:
+        return {
+            "count": 0,
+            "avg": None,
+            "min": None,
+            "max": None,
+        }
+    return {
+        "count": len(values),
+        "avg": round(sum(values) / len(values), 3),
+        "min": round(min(values), 3),
+        "max": round(max(values), 3),
+    }
+
+
+def _average(values: list[float]) -> float | None:
+    if not values:
+        return None
+    return sum(values) / len(values)
+
+
+def _format_datetime(value: datetime | None) -> str | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=UTC)
+    return value.astimezone(UTC).isoformat()
 
 
 class EdgeRuntime:
@@ -71,6 +177,16 @@ class EdgeRuntime:
             label_accept_confidence=config.thresholds.label_accept_confidence,
         )
         self.session_identifier = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
+        self.run_stats = RunStats(
+            device_id=config.device_id,
+            session_identifier=self.session_identifier,
+            yolo_model_path=str(config.models.yolo_model_path),
+            yolo_image_size=config.models.yolo_image_size,
+            yolo_confidence_floor=config.models.yolo_confidence_floor,
+            confidence_threshold=config.thresholds.confidence,
+            allowed_classes=config.allowed_classes,
+            heartbeat_interval_seconds=config.heartbeat_interval_seconds,
+        )
         self.pending_events: dict[str, PendingEvent] = {}
         self._last_heartbeat_at = 0.0
 
@@ -78,6 +194,8 @@ class EdgeRuntime:
         self._ensure_components()
         processed_frames = 0
         last_frame_index = -1
+        self.run_stats.started_at = datetime.now(UTC)
+        started_monotonic = self.monotonic()
         self.camera.start()
         self._send_heartbeat(force=True)
 
@@ -94,7 +212,10 @@ class EdgeRuntime:
 
                 last_frame_index = frame.index
                 processed_frames += 1
+                frame_started_at = self.monotonic()
                 self._process_frame(frame)
+                self.run_stats.processed_frames += 1
+                self.run_stats.frame_processing_ms.append((self.monotonic() - frame_started_at) * 1000.0)
 
                 if self.config.show_preview and self._render_preview(frame):
                     break
@@ -103,11 +224,14 @@ class EdgeRuntime:
 
             self._flush_pending_events(force=True)
         finally:
+            self.run_stats.ended_at = datetime.now(UTC)
+            self.run_stats.duration_seconds = max(0.0, self.monotonic() - started_monotonic)
             self.camera.stop()
             if self.config.show_preview:
                 import cv2
 
                 cv2.destroyAllWindows()
+            self._write_run_log()
 
     def _ensure_components(self) -> None:
         if self.camera is None:
@@ -276,6 +400,7 @@ class EdgeRuntime:
         self._save_debug_images(inspection, track)
         self.stabilizer.mark_event_queued(track)
         self.pending_events[inspection.event_id] = PendingEvent(inspection=inspection, track=track)
+        self.run_stats.finalized_events += 1
         self._flush_pending_events(force=True)
 
     def _update_track_zone(self, track: TrackState, frame) -> bool:
@@ -303,6 +428,7 @@ class EdgeRuntime:
                 continue
 
             result = self.transport.send_event(map_event_payload(pending.inspection))
+            self._record_event_transport_result(result)
             if result.accepted:
                 self.stabilizer.mark_emitted(pending.track)
                 self.pending_events.pop(event_id, None)
@@ -311,6 +437,7 @@ class EdgeRuntime:
 
             if result.retryable:
                 pending.next_attempt_at = now + self.config.pending_retry_delay_seconds
+                self.run_stats.event_retry_scheduled += 1
                 LOGGER.warning("event send retry scheduled event_id=%s detail=%s", event_id, result.detail)
                 continue
 
@@ -327,9 +454,51 @@ class EdgeRuntime:
             status="online",
         )
         result = self.transport.send_heartbeat(payload)
+        self._record_heartbeat_transport_result(result)
         self._last_heartbeat_at = now
         if not result.accepted:
             LOGGER.warning("heartbeat send failed device_id=%s detail=%s", self.config.device_id, result.detail)
+
+    def _record_event_transport_result(self, result) -> None:
+        self.run_stats.event_http_attempts += result.attempts or 1
+        if result.elapsed_ms is not None:
+            self.run_stats.event_latency_ms.append(result.elapsed_ms)
+        if result.total_elapsed_ms is not None:
+            self.run_stats.event_total_http_elapsed_ms.append(result.total_elapsed_ms)
+        if result.accepted:
+            if result.duplicate:
+                self.run_stats.event_duplicates += 1
+            else:
+                self.run_stats.event_accepted += 1
+            return
+        if result.status_code == 409:
+            self.run_stats.event_conflicts += 1
+        else:
+            self.run_stats.event_failed += 1
+
+    def _record_heartbeat_transport_result(self, result) -> None:
+        self.run_stats.heartbeat_attempts += result.attempts or 1
+        if result.elapsed_ms is not None:
+            self.run_stats.heartbeat_latency_ms.append(result.elapsed_ms)
+        if result.accepted:
+            self.run_stats.heartbeat_accepted += 1
+        else:
+            self.run_stats.heartbeat_failed += 1
+
+    def _write_run_log(self) -> None:
+        if not self.config.debug.save_run_log:
+            return
+
+        output_path = self.config.debug.run_log_path
+        if output_path is None:
+            output_path = self.config.debug.output_dir / f"{self.session_identifier}__run_log.json"
+
+        try:
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_text(json.dumps(self.run_stats.to_dict(), indent=2) + "\n", encoding="utf-8")
+            LOGGER.info("run log written path=%s", output_path)
+        except Exception:
+            LOGGER.exception("run log write failed path=%s", output_path)
 
     def _evaluate_contamination_crop(self, crop) -> ContaminationResult:
         evaluate_crop = getattr(self.contamination_evaluator, "evaluate_crop", None)

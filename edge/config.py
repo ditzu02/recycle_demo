@@ -61,6 +61,8 @@ class DebugConfig:
     save_images: bool = False
     output_dir: Path = REPO_ROOT / "edge_debug"
     save_annotated_frame: bool = True
+    save_run_log: bool = False
+    run_log_path: Path | None = None
 
 
 @dataclass
@@ -145,6 +147,8 @@ class EdgeConfig:
                 save_images=_env_bool("EDGE_DEBUG_SAVE_IMAGES", False),
                 output_dir=Path(os.getenv("EDGE_DEBUG_OUTPUT_DIR", str(REPO_ROOT / "edge_debug"))),
                 save_annotated_frame=_env_bool("EDGE_DEBUG_SAVE_ANNOTATED_FRAME", True),
+                save_run_log=_env_bool("EDGE_SAVE_RUN_LOG", False),
+                run_log_path=_env_optional_path("EDGE_RUN_LOG_PATH"),
             ),
         )
 
@@ -161,6 +165,8 @@ class EdgeConfig:
             raise ValueError("contamination_sample_count must be at least 1.")
         if not 0.0 <= self.models.yolo_confidence_floor <= 1.0:
             raise ValueError("yolo_confidence_floor must be within [0, 1].")
+        if self.models.yolo_image_size < 1:
+            raise ValueError("yolo_image_size must be positive.")
         if not 0.0 <= self.thresholds.label_accept_confidence <= 1.0:
             raise ValueError("label_accept_confidence must be within [0, 1].")
         if self.thresholds.dirty_review_threshold > self.thresholds.dirty_reject_threshold:
@@ -201,6 +207,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--evaluation-zone", help="Normalized x1,y1,x2,y2 rectangle used as the evaluation gate.")
     parser.add_argument("--inspection-zone", help=argparse.SUPPRESS)
     parser.add_argument("--yolo-confidence-floor", type=float)
+    parser.add_argument("--yolo-imgsz", type=int)
     parser.add_argument("--yolo-class-names")
     parser.add_argument("--yolo-model-path")
     parser.add_argument("--contamination-model-path")
@@ -209,6 +216,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--save-debug-images", action="store_true")
     parser.add_argument("--debug-output-dir")
     parser.add_argument("--no-debug-frame", action="store_true")
+    parser.add_argument("--save-run-log", action="store_true")
+    parser.add_argument("--run-log-path")
     parser.add_argument("--show", action="store_true")
     return parser
 
@@ -264,6 +273,8 @@ def build_config(argv: list[str] | None = None) -> EdgeConfig:
         config.evaluation_zone = _parse_zone(args.evaluation_zone)
     if args.yolo_confidence_floor is not None:
         config.models.yolo_confidence_floor = args.yolo_confidence_floor
+    if args.yolo_imgsz is not None:
+        config.models.yolo_image_size = args.yolo_imgsz
     if args.yolo_class_names:
         config.models.yolo_class_names = _parse_csv(args.yolo_class_names)
     if args.yolo_model_path:
@@ -280,6 +291,10 @@ def build_config(argv: list[str] | None = None) -> EdgeConfig:
         config.debug.output_dir = Path(args.debug_output_dir)
     if args.no_debug_frame:
         config.debug.save_annotated_frame = False
+    if args.save_run_log:
+        config.debug.save_run_log = True
+    if args.run_log_path:
+        config.debug.run_log_path = Path(args.run_log_path)
     if args.show:
         config.show_preview = True
 
@@ -315,6 +330,13 @@ def _env_optional_float(name: str) -> float | None:
     if value in (None, ""):
         return None
     return float(value)
+
+
+def _env_optional_path(name: str) -> Path | None:
+    value = os.getenv(name)
+    if value in (None, ""):
+        return None
+    return Path(value)
 
 
 def _env_csv(name: str, default: tuple[str, ...]) -> tuple[str, ...]:

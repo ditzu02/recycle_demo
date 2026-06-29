@@ -39,6 +39,7 @@ class EdgeConfigAndPayloadTests(unittest.TestCase):
         self.assertEqual(config.event_endpoint_url, "http://127.0.0.1:8000/api/inference")
         self.assertEqual(config.heartbeat_endpoint_url, "http://127.0.0.1:8000/api/heartbeat")
         self.assertEqual(config.allowed_classes, ("Metal",))
+        self.assertEqual(config.models.yolo_image_size, 640)
         self.assertEqual(config.models.yolo_confidence_floor, 0.50)
         self.assertEqual(config.models.yolo_class_names, ())
         self.assertEqual(config.thresholds.min_in_zone_frames_for_evaluation, 2)
@@ -46,6 +47,7 @@ class EdgeConfigAndPayloadTests(unittest.TestCase):
         self.assertEqual(config.thresholds.label_accept_confidence, 0.85)
         self.assertEqual(config.evaluation_zone, InspectionZoneConfig(x1=0.20, y1=0.55, x2=0.80, y2=0.95))
         self.assertFalse(config.debug.save_images)
+        self.assertFalse(config.debug.save_run_log)
         self.assertEqual(config.debug.output_dir.name, "edge_debug")
 
     def test_cli_can_override_yolo_confidence_floor(self) -> None:
@@ -56,6 +58,17 @@ class EdgeConfigAndPayloadTests(unittest.TestCase):
             cli_config = build_config(["--yolo-confidence-floor", "0.40"])
         self.assertEqual(config.models.yolo_confidence_floor, 0.50)
         self.assertEqual(cli_config.models.yolo_confidence_floor, 0.40)
+
+    def test_cli_can_override_yolo_image_size_and_run_log(self) -> None:
+        from edge.config import build_config
+
+        with tempfile.TemporaryDirectory() as tempdir, mock.patch.dict(os.environ, {}, clear=True):
+            log_path = str(Path(tempdir) / "run.json")
+            config = build_config(["--yolo-imgsz", "416", "--save-run-log", "--run-log-path", log_path])
+
+        self.assertEqual(config.models.yolo_image_size, 416)
+        self.assertTrue(config.debug.save_run_log)
+        self.assertEqual(config.debug.run_log_path, Path(log_path))
 
     def test_cli_can_override_contamination_sample_count(self) -> None:
         from edge.config import build_config
@@ -405,6 +418,9 @@ class TransportTests(unittest.TestCase):
         self.assertTrue(result.accepted)
         self.assertTrue(result.duplicate)
         self.assertEqual(urlopen.calls, 1)
+        self.assertEqual(result.attempts, 1)
+        self.assertIsNotNone(result.elapsed_ms)
+        self.assertIsNotNone(result.total_elapsed_ms)
 
     def test_transport_retries_transient_failure_then_accepts(self) -> None:
         urlopen = ScriptedUrlopen(
@@ -422,6 +438,9 @@ class TransportTests(unittest.TestCase):
 
         self.assertTrue(result.accepted)
         self.assertEqual(urlopen.calls, 2)
+        self.assertEqual(result.attempts, 2)
+        self.assertIsNotNone(result.elapsed_ms)
+        self.assertIsNotNone(result.total_elapsed_ms)
 
 
 class RuntimeTests(unittest.TestCase):
@@ -687,6 +706,44 @@ class RuntimeTests(unittest.TestCase):
             self.assertTrue(any(path.name.endswith("__frame.png") for path in saved_files))
             self.assertTrue(all(event_id in path.name for path in saved_files))
             self.assertTrue(all(path.stat().st_size > 0 for path in saved_files))
+
+    def test_runtime_writes_run_log_when_enabled(self) -> None:
+        frames = [_make_frame(index=index, width=100, height=100) for index in range(7)]
+        detector = SequenceDetector(
+            {
+                0: [Detection(label="Metal", confidence=0.90, class_id=1, bbox=BBox(20, 20, 60, 60))],
+                1: [Detection(label="Metal", confidence=0.92, class_id=1, bbox=BBox(20, 40, 60, 80))],
+                2: [Detection(label="Metal", confidence=0.93, class_id=1, bbox=BBox(20, 45, 60, 85))],
+                3: [Detection(label="Metal", confidence=0.91, class_id=1, bbox=BBox(20, 46, 60, 86))],
+                4: [Detection(label="Metal", confidence=0.90, class_id=1, bbox=BBox(20, 44, 60, 84))],
+                5: [Detection(label="Metal", confidence=0.89, class_id=1, bbox=BBox(20, 24, 60, 64))],
+            }
+        )
+        transport = ScriptedTransport([])
+        with tempfile.TemporaryDirectory() as tempdir:
+            config = _build_test_config()
+            config.debug.save_run_log = True
+            config.debug.run_log_path = Path(tempdir) / "run_log.json"
+            runtime = EdgeRuntime(
+                config,
+                camera=FrameSequenceCamera(frames),
+                detector=detector,
+                contamination_evaluator=FixedContaminationEvaluator(),
+                transport=transport,
+            )
+
+            runtime.run(max_frames=len(frames))
+
+            payload = json.loads(config.debug.run_log_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(payload["run"]["device_id"], "edge_demo_01")
+        self.assertEqual(payload["configuration"]["yolo_image_size"], 640)
+        self.assertEqual(payload["frames"]["processed"], len(frames))
+        self.assertEqual(payload["frames"]["processing_ms"]["count"], len(frames))
+        self.assertEqual(payload["events"]["finalized"], 1)
+        self.assertEqual(payload["events"]["http_attempts"], 1)
+        self.assertEqual(payload["events"]["accepted"], 1)
+        self.assertEqual(payload["heartbeats"]["http_attempts"], 1)
 
     def test_runtime_accepts_supported_non_metal_without_running_cnn(self) -> None:
         frames = [_make_frame(index=index, width=100, height=100) for index in range(7)]
