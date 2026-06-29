@@ -380,6 +380,35 @@ class BrainHardeningTests(unittest.TestCase):
         self.assertNotIn("Brain-v1 API explorer", system_html)
         self.assertNotIn("Distributed edge-AI coordination", system_html)
 
+    def test_static_asset_serves_expected_content_type(self) -> None:
+        status_code, headers, body = self._request_raw("GET", "/static/styles.css")
+
+        self.assertEqual(status_code, 200)
+        self.assertEqual(headers["Content-Type"], "text/css; charset=utf-8")
+        self.assertIn(b"body", body)
+
+    def test_missing_and_unsafe_paths_return_404(self) -> None:
+        for path in ("/not-found", "/static/missing.css", "/static/../backend/app.py"):
+            with self.subTest(path=path):
+                status_code, response = self._request_json("GET", path)
+                self.assertEqual(status_code, 404)
+                self.assertEqual(response["status"], "error")
+                self.assertEqual(response["detail"], "Not found")
+
+    def test_live_overview_query_limit_is_clamped(self) -> None:
+        for index in range(30):
+            self._request_json("POST", "/api/inference", build_event_payload(event_id=f"evt-limit-{index:03d}"))
+
+        status_code, response = self._request_json("GET", "/api/overview/live?limit=500")
+        self.assertEqual(status_code, 200)
+        self.assertEqual(response["limit"], 25)
+        self.assertEqual(len(response["items"]), 25)
+
+        status_code, response = self._request_json("GET", "/api/overview/live?limit=0")
+        self.assertEqual(status_code, 200)
+        self.assertEqual(response["limit"], 1)
+        self.assertEqual(len(response["items"]), 1)
+
     def _set_heartbeat_state(self, device_id: str, received_at: str, status: str) -> None:
         connection = sqlite3.connect(self.repository.db_path)
         try:
@@ -413,6 +442,17 @@ class BrainHardeningTests(unittest.TestCase):
         *,
         content_type: str = "application/json",
     ) -> tuple[int, dict]:
+        status_code, _, response_body = self._request_raw(method, path, body=body, content_type=content_type)
+        return status_code, json.loads(response_body.decode("utf-8"))
+
+    def _request_raw(
+        self,
+        method: str,
+        path: str,
+        body: bytes = b"",
+        *,
+        content_type: str = "",
+    ) -> tuple[int, dict[str, str], bytes]:
         environ: dict[str, object] = {}
         setup_testing_defaults(environ)
         environ["REQUEST_METHOD"] = method
@@ -436,26 +476,11 @@ class BrainHardeningTests(unittest.TestCase):
 
         response_body = b"".join(self.application(environ, start_response))
         status_code = int(str(state["status"]).split(" ", 1)[0])
-        return status_code, json.loads(response_body.decode("utf-8"))
+        headers = {key: value for key, value in state["headers"]}
+        return status_code, headers, response_body
 
     def _request_html(self, method: str, path: str) -> tuple[int, str]:
-        environ: dict[str, object] = {}
-        setup_testing_defaults(environ)
-        environ["REQUEST_METHOD"] = method
-        environ["PATH_INFO"] = path
-        environ["QUERY_STRING"] = ""
-        environ["REMOTE_ADDR"] = "127.0.0.1"
-        environ["CONTENT_LENGTH"] = "0"
-        environ["wsgi.input"] = io.BytesIO(b"")
-
-        state: dict[str, object] = {}
-
-        def start_response(status: str, headers: list[tuple[str, str]]) -> None:
-            state["status"] = status
-            state["headers"] = headers
-
-        response_body = b"".join(self.application(environ, start_response))
-        status_code = int(str(state["status"]).split(" ", 1)[0])
+        status_code, _, response_body = self._request_raw(method, path)
         return status_code, response_body.decode("utf-8")
 
 

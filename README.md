@@ -1,5 +1,7 @@
 # Recycle Demo
 
+[![Tests](https://github.com/ditzu02/recycle_demo/actions/workflows/tests.yml/badge.svg)](https://github.com/ditzu02/recycle_demo/actions/workflows/tests.yml)
+
 This repository now contains three local proof-of-concept parts:
 
 - `demo_webcam.py`: the existing edge-side YOLO + CNN webcam demo
