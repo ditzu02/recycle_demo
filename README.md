@@ -6,6 +6,21 @@ This repository now contains three local proof-of-concept parts:
 - `edge/`: the initial real edge runtime package for local demos and future Raspberry Pi porting
 - `brain/`: a central coordination prototype that receives, stores, and visualizes finalized inspection events and heartbeats from future Raspberry Pi devices
 
+## Test Locally
+
+Install the fast test dependencies:
+
+```bash
+./.venv/bin/pip install -r requirements-test.txt
+```
+
+Run the CI-ready checks:
+
+```bash
+./.venv/bin/python -m compileall -q brain edge tests demo_webcam.py
+./.venv/bin/python -m unittest discover -s tests -p 'test*.py'
+```
+
 ## Edge Runtime
 
 `edge/` is the maintainable runtime path that replaces the one-file webcam demo for real device flow work.

@@ -314,6 +314,41 @@ class BrainHardeningTests(unittest.TestCase):
         self.assertEqual(status_code, 400)
         self.assertIn("timestamp", response["detail"])
 
+    def test_empty_json_body_returns_400_for_ingest_routes(self) -> None:
+        for path in ("/api/inference", "/api/heartbeat"):
+            with self.subTest(path=path):
+                status_code, response = self._request_raw_json("POST", path, b"")
+                self.assertEqual(status_code, 400)
+                self.assertEqual(response["status"], "error")
+                self.assertIn("empty", response["detail"])
+
+    def test_malformed_json_body_returns_400_for_ingest_routes(self) -> None:
+        for path in ("/api/inference", "/api/heartbeat"):
+            with self.subTest(path=path):
+                status_code, response = self._request_raw_json("POST", path, b'{"not valid json"')
+                self.assertEqual(status_code, 400)
+                self.assertEqual(response["status"], "error")
+                self.assertIn("valid JSON", response["detail"])
+
+    def test_ingest_routes_parse_json_body_regardless_of_content_type(self) -> None:
+        inference_status, inference_response = self._request_raw_json(
+            "POST",
+            "/api/inference",
+            json.dumps(build_event_payload(event_id="evt-text-plain")).encode("utf-8"),
+            content_type="text/plain",
+        )
+        self.assertEqual(inference_status, 201)
+        self.assertEqual(inference_response["result"], "accepted")
+
+        heartbeat_status, heartbeat_response = self._request_raw_json(
+            "POST",
+            "/api/heartbeat",
+            json.dumps(build_heartbeat_payload(device_id="pi_text_plain")).encode("utf-8"),
+            content_type="text/plain",
+        )
+        self.assertEqual(heartbeat_status, 200)
+        self.assertEqual(heartbeat_response["result"], "accepted")
+
     def test_dashboard_pages_render(self) -> None:
         self._request_json("POST", "/api/inference", build_event_payload())
         self._request_json("POST", "/api/heartbeat", build_heartbeat_payload())
@@ -363,6 +398,21 @@ class BrainHardeningTests(unittest.TestCase):
             connection.close()
 
     def _request_json(self, method: str, path: str, payload: dict | None = None) -> tuple[int, dict]:
+        body = b""
+        content_type = ""
+        if payload is not None:
+            body = json.dumps(payload).encode("utf-8")
+            content_type = "application/json"
+        return self._request_raw_json(method, path, body, content_type=content_type)
+
+    def _request_raw_json(
+        self,
+        method: str,
+        path: str,
+        body: bytes,
+        *,
+        content_type: str = "application/json",
+    ) -> tuple[int, dict]:
         environ: dict[str, object] = {}
         setup_testing_defaults(environ)
         environ["REQUEST_METHOD"] = method
@@ -373,11 +423,8 @@ class BrainHardeningTests(unittest.TestCase):
         environ["PATH_INFO"] = request_path
         environ["QUERY_STRING"] = query_string
         environ["REMOTE_ADDR"] = "127.0.0.1"
-
-        body = b""
-        if payload is not None:
-            body = json.dumps(payload).encode("utf-8")
-            environ["CONTENT_TYPE"] = "application/json"
+        if content_type:
+            environ["CONTENT_TYPE"] = content_type
         environ["CONTENT_LENGTH"] = str(len(body))
         environ["wsgi.input"] = io.BytesIO(body)
 

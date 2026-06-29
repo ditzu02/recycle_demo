@@ -1,13 +1,11 @@
 from __future__ import annotations
 
-import torch
-import torch.nn as nn
-from torchvision import models, transforms
-
 from edge.types import BBox, ContaminationResult, extract_snapshot_crop
 
 
-def pick_torch_device() -> torch.device:
+def pick_torch_device():
+    import torch
+
     if torch.cuda.is_available():
         return torch.device("cuda")
     if torch.backends.mps.is_available():
@@ -15,7 +13,10 @@ def pick_torch_device() -> torch.device:
     return torch.device("cpu")
 
 
-def build_cnn(*, num_classes: int = 2) -> nn.Module:
+def build_cnn(*, num_classes: int = 2):
+    import torch.nn as nn
+    from torchvision import models
+
     model = models.mobilenet_v3_small(weights=models.MobileNet_V3_Small_Weights.DEFAULT)
     in_features = model.classifier[-1].in_features
     model.classifier[-1] = nn.Linear(in_features, num_classes)
@@ -31,7 +32,10 @@ def convert_bgr_to_rgb(image):
 
 
 class MetalContaminationEvaluator:
-    def __init__(self, *, weights_path: str, device: torch.device | None = None, image_size: int = 224) -> None:
+    def __init__(self, *, weights_path: str, device=None, image_size: int = 224) -> None:
+        import torch
+        from torchvision import transforms
+
         self.device = device or pick_torch_device()
         self.model = build_cnn(num_classes=2).to(self.device)
         state = torch.load(weights_path, map_location=self.device)

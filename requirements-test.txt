@@ -1,0 +1,4 @@
+-r requirements-brain.txt
+
+numpy
+opencv-python-headless
