@@ -4,8 +4,11 @@
   const pageDescription = document.getElementById("page-description");
   const pageContent = document.getElementById("page-content");
   const navLinks = Array.from(document.querySelectorAll(".site-nav a[data-page]"));
+  const themeToggle = document.querySelector("[data-theme-toggle]");
+  const themeLabel = document.querySelector("[data-theme-label]");
   const parser = new DOMParser();
   const cache = new Map();
+  const themeStorageKey = "brain-ui-theme";
   const cacheTtlMs = 5000;
   const pageRefreshMs = 5000;
   const overviewLiveRefreshMs = 3000;
@@ -13,6 +16,39 @@
   const fullRefreshPages = new Set(["events"]);
   let refreshTimerId = 0;
   let refreshInFlight = false;
+
+  function currentTheme() {
+    return document.documentElement.dataset.theme === "light" ? "light" : "dark";
+  }
+
+  function setTheme(theme, { persist = false } = {}) {
+    const normalized = theme === "light" ? "light" : "dark";
+    document.documentElement.dataset.theme = normalized;
+    document.documentElement.style.colorScheme = normalized;
+    if (themeToggle) {
+      themeToggle.setAttribute("aria-checked", normalized === "light" ? "true" : "false");
+      themeToggle.setAttribute("aria-label", `Switch to ${normalized === "light" ? "dark" : "light"} theme`);
+      themeToggle.title = `Switch to ${normalized === "light" ? "dark" : "light"} theme`;
+    }
+    if (themeLabel) {
+      themeLabel.textContent = normalized === "light" ? "Light" : "Dark";
+    }
+    if (persist) {
+      try {
+        window.localStorage.setItem(themeStorageKey, normalized);
+      } catch (error) {
+        // The theme still changes even when localStorage is unavailable.
+      }
+    }
+  }
+
+  setTheme(currentTheme());
+
+  if (themeToggle) {
+    themeToggle.addEventListener("click", () => {
+      setTheme(currentTheme() === "light" ? "dark" : "light", { persist: true });
+    });
+  }
 
   if (!shell || !pageName || !pageContent || !navLinks.length || !window.history.pushState) {
     return;
@@ -88,6 +124,11 @@
         link.removeAttribute("aria-current");
       }
     }
+  }
+
+  function setShellLoading(isLoading) {
+    shell.classList.toggle("is-loading", isLoading);
+    pageContent.setAttribute("aria-busy", isLoading ? "true" : "false");
   }
 
   function render(state, { scroll = true } = {}) {
@@ -371,7 +412,7 @@
       return false;
     }
 
-    shell.classList.add("is-loading");
+    setShellLoading(true);
     try {
       const nextState = readFromCache(urlKey) || await fetchState(urlKey);
       render(nextState, { scroll });
@@ -383,7 +424,7 @@
       window.location.assign(urlKey);
       return false;
     } finally {
-      shell.classList.remove("is-loading");
+      setShellLoading(false);
     }
   }
 
@@ -536,7 +577,7 @@
       render(cachedState, { scroll: false });
       return;
     }
-    shell.classList.add("is-loading");
+    setShellLoading(true);
     fetchState(urlKey)
       .then((state) => {
         render(state, { scroll: false });
@@ -545,7 +586,7 @@
         window.location.reload();
       })
       .finally(() => {
-        shell.classList.remove("is-loading");
+        setShellLoading(false);
       });
   });
 
