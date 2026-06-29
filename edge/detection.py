@@ -10,7 +10,10 @@ from edge.types import BBox, Detection, FrameSample
 SUPPORTED_YOLO_MODEL_FORMATS = {"pt", "onnx"}
 
 
-def pick_yolo_device() -> str:
+def pick_yolo_device(model_format: str) -> str:
+    if model_format == "onnx":
+        return "cpu"
+
     import torch
 
     if torch.cuda.is_available():
@@ -37,10 +40,10 @@ class YOLODetector:
 
         from ultralytics import YOLO
 
-        self.model = YOLO(model_path)
+        self.model = YOLO(model_path, task="detect")
         self.image_size = image_size
         self.confidence_floor = confidence_floor
-        self.device = device or pick_yolo_device()
+        self.device = device or pick_yolo_device(self.model_format)
         model_backend = getattr(self.model, "model", None)
         raw_names = getattr(model_backend, "names", {}) or getattr(self.model, "names", {})
         self.class_names = normalize_class_names(raw_names)

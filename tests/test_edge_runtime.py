@@ -22,7 +22,7 @@ from brain.models.schema import parse_heartbeat_payload, parse_inference_payload
 from edge.config import EdgeConfig, InspectionZoneConfig, ThresholdConfig
 from edge.contamination import convert_bgr_to_rgb
 from edge.decision import DecisionEngine
-from edge.detection import YOLODetector, infer_yolo_model_format
+from edge.detection import YOLODetector, infer_yolo_model_format, pick_yolo_device
 from edge.filtering import DetectionFilter, is_bbox_center_in_zone
 from edge.payloads import build_event_id, map_event_payload, map_heartbeat_payload
 from edge.runtime import EdgeRuntime
@@ -176,6 +176,9 @@ class FilteringAndDecisionTests(unittest.TestCase):
         self.assertEqual(infer_yolo_model_format("best8S.pt"), "pt")
         self.assertEqual(infer_yolo_model_format("best8S.onnx"), "onnx")
 
+    def test_onnx_yolo_device_defaults_to_cpu(self) -> None:
+        self.assertEqual(pick_yolo_device("onnx"), "cpu")
+
     def test_onnx_yolo_detector_uses_same_detection_shape(self) -> None:
         fake_ultralytics = SimpleNamespace(YOLO=FakeYOLOWithoutClassNames)
         with mock.patch.dict(sys.modules, {"ultralytics": fake_ultralytics}):
@@ -190,6 +193,8 @@ class FilteringAndDecisionTests(unittest.TestCase):
         detections = detector.detect(_make_frame(index=4, width=100, height=100))
 
         self.assertEqual(detector.model_format, "onnx")
+        self.assertEqual(detector.model.init_kwargs["task"], "detect")
+        self.assertEqual(detector.device, "cpu")
         self.assertEqual(len(detections), 1)
         self.assertEqual(detections[0].label, "Metal")
         self.assertEqual(detections[0].class_id, 1)
@@ -823,8 +828,9 @@ class FakeYOLOResult:
 
 
 class FakeYOLOWithoutClassNames:
-    def __init__(self, model_path: str) -> None:
+    def __init__(self, model_path: str, **kwargs) -> None:
         self.model_path = model_path
+        self.init_kwargs = kwargs
         self.model = SimpleNamespace(names={})
 
     def predict(self, **kwargs):
